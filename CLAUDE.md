@@ -77,3 +77,7 @@ asynchronous live context instead ([architecture](guides/architecture.md)).
 `tools/check_manipulation.py --sequence configs/continuous_four.json --no-visuals`, scored with
 `tools/score_session.py`. Model behaviour is measured as rates over repeated `tools/run_wave.py`
 sessions, never from one run.
+
+`.githooks/pre-commit` runs ruff and pytest on a commit that touches Python (enable once per
+clone: `git config core.hooksPath .githooks`), and `.github/workflows/checks.yml` runs the same
+two on every push.
