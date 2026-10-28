@@ -16,7 +16,11 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
       - name: Install
-        run: pip install -e ".[dev]"
+        run: |
+          pip install -e ".[dev]"
+          # the exploration extra's hardware half (CycloneDDS, unitree SDK) needs a C build;
+          # the tests only reach the pure-Python and wheel half of it
+          pip install matplotlib opencv-python-headless pyzmq mcap yourdfpy scikit-image
       - name: Install GL libraries
         run: sudo apt-get update && sudo apt-get install -y libosmesa6 libgl1
       - name: Lint
