@@ -1,0 +1,15 @@
+#!/bin/sh
+# The checks CLAUDE.md names, run before a commit that touches Python.
+# Enable once per clone: git config core.hooksPath .githooks
+set -e
+cd "$(git rev-parse --show-toplevel)"
+
+[ -n "$(git diff --cached --name-only --diff-filter=ACMR -- '*.py')" ] || exit 0
+
+ruff=.venv/bin/ruff
+pytest=.venv/bin/pytest
+[ -x "$ruff" ] || ruff=ruff
+[ -x "$pytest" ] || pytest=pytest
+
+"$ruff" check src tests tools
+"$pytest" tests -q

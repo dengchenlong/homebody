@@ -1,4 +1,4 @@
-"""The Anthropic and OpenAI API providers: one request, the schema, the images, no fallback."""
+"""The API providers: one request, the schema, the images, no fallback."""
 import http.client
 import io
 import json
@@ -9,15 +9,23 @@ import urllib.error
 import pytest
 
 from homebody.session.settings import Agent
-from homebody.vlm import api, provider
-from homebody.vlm.api import ClaudeApi, OpenAiApi
+from homebody.vlm import api, catalog, provider
+from homebody.vlm.api import ClaudeApi, GlmApi, OpenAiApi
 from homebody.vlm.provider import Cancelled, ProviderError
 
 PNG = (b"\x89PNG\r\n\x1a\n" + bytes(16))
 DECISION = {"text": "Nothing left to do.", "skill": "done", "arguments_json": "{}"}
-REPLIES = {ClaudeApi: {"content": [{"type": "tool_use", "name": "decide", "input": DECISION}]},
-           OpenAiApi: {"choices": [{"message": {"content": json.dumps(DECISION)}}]}}
-PROVIDERS = [(ClaudeApi, "ANTHROPIC_API_KEY"), (OpenAiApi, "OPENAI_API_KEY")]
+CLAUDE_REPLY = {"content": [{"type": "tool_use", "name": "decide", "input": DECISION}]}
+OPENAI_REPLY = {"choices": [{"message": {"content": json.dumps(DECISION)}}]}
+
+# Derived from the catalog, so a provider registered there cannot skip these tests.
+PROVIDERS = sorted(((cls, cls.KEY) for cls in catalog.PROVIDERS.values() if getattr(cls, "KEY", None)),
+                   key=lambda row: row[0].__name__)
+
+
+def reply_for(cls):
+    """The shape a provider parses: Anthropic's tool call, or Chat Completions content."""
+    return OPENAI_REPLY if issubclass(cls, OpenAiApi) else CLAUDE_REPLY
 
 
 def fake_transport(monkeypatch, reply, status=200, delay=.05):
@@ -100,7 +108,7 @@ def test_claude_api_forces_the_decision_tool_and_attaches_the_images(tmp_path, m
 
 def test_openai_api_requests_a_strict_schema_and_parses_the_content(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "k-test")
-    calls = fake_transport(monkeypatch, REPLIES[OpenAiApi])
+    calls = fake_transport(monkeypatch, OPENAI_REPLY)
     decision = OpenAiApi(Agent(model="astra-api")).generate(
         "prompt text", images=images(tmp_path, 1), names=("pick", "done"), attempt=tmp_path / "attempt",
         tick=lambda: None, cancelled=lambda: False)
@@ -109,6 +117,46 @@ def test_openai_api_requests_a_strict_schema_and_parses_the_content(tmp_path, mo
     assert url == OpenAiApi.URL and headers["Authorization"] == "Bearer k-test" and body["model"] == "gpt-6-astra"
     assert body["response_format"]["json_schema"]["strict"] is True
     assert body["messages"][0]["content"][0]["image_url"]["url"].startswith("data:image/png;base64,")
+
+
+def test_glm_api_asks_for_plain_json_and_strips_a_fenced_reply(tmp_path, monkeypatch):
+    """The relay ignores strict schemas: the request asks for a JSON object and a trailing
+    instruction, and the reply arrives fenced."""
+    monkeypatch.setenv("GLM_API_KEY", "k-test")
+    fenced = "```json\n" + json.dumps({**DECISION, "text": "The carton is in reach."}) + "\n```"
+    calls = fake_transport(monkeypatch, {"choices": [{"message": {"content": fenced}}]})
+    decision = GlmApi(Agent(model="glm")).generate(
+        "prompt text", images=images(tmp_path, 1), names=("done",), attempt=tmp_path / "attempt",
+        tick=lambda: None, cancelled=lambda: False)
+    assert (decision.skill, decision.text) == ("done", "The carton is in reach.")
+    url, headers, body, _ = calls[0]
+    assert url == GlmApi.URL and headers["Authorization"] == "Bearer k-test"
+    assert body["response_format"] == {"type": "json_object"}
+    assert body["messages"][0]["content"][-1]["text"].startswith("Reply with ONLY one JSON object")
+
+
+@pytest.mark.parametrize("content", [
+    'Narration first. {"text": "ok", "skill": "done", "arguments_json": "{}"}',
+    [{"type": "text", "text": '{"text": "ok", "skill": "done", "arguments_json": "{}"}'}]])
+def test_glm_api_accepts_narration_and_a_parts_array(tmp_path, monkeypatch, content):
+    """Some relays narrate before the object or return the parts array instead of a string."""
+    monkeypatch.setenv("GLM_API_KEY", "k")
+    fake_transport(monkeypatch, {"choices": [{"message": {"content": content}}]})
+    decision = GlmApi(Agent(model="glm")).generate(
+        "p", images=(), names=("done",), attempt=tmp_path / "a", tick=lambda: None,
+        cancelled=lambda: False)
+    assert decision.skill == "done"
+
+
+def test_glm_api_turns_an_object_arguments_json_into_a_string(tmp_path, monkeypatch):
+    """Decision.parse reads a JSON string, and this relay sometimes sends the object."""
+    monkeypatch.setenv("GLM_API_KEY", "k")
+    content = json.dumps({"text": "ok", "skill": "pick", "arguments_json": {"hand": "right"}})
+    fake_transport(monkeypatch, {"choices": [{"message": {"content": content}}]})
+    decision = GlmApi(Agent(model="glm")).generate(
+        "p", images=(), names=("pick", "done"), attempt=tmp_path / "a", tick=lambda: None,
+        cancelled=lambda: False)
+    assert (decision.skill, decision.arguments) == ("pick", {"hand": "right"})
 
 
 @pytest.mark.parametrize("cls, variable", PROVIDERS)
@@ -138,7 +186,7 @@ def test_attempt_evidence_never_holds_the_key(tmp_path, monkeypatch, cls, variab
     assert set(files) == {"prompt.txt", "request.json", "status.json"}
     assert not any("k-secret-zz" in text for text in files.values())
     assert "[redacted]" in json.loads(files["status.json"])["error"]
-    calls = fake_transport(monkeypatch, REPLIES[cls])
+    calls = fake_transport(monkeypatch, reply_for(cls))
     decision = cls(Agent()).generate("p", images=images(tmp_path, 1), names=("done",), attempt=tmp_path / "b",
                                      tick=lambda: None, cancelled=lambda: False)
     assert decision.skill == "done"
@@ -154,7 +202,7 @@ def test_a_key_no_header_can_carry_is_refused_before_any_request(tmp_path, monke
     """http.client refuses such a header inside the request thread, quoting the whole value
     in its error on stderr; the key must stop at the environment."""
     monkeypatch.setenv(variable, value)
-    calls = fake_transport(monkeypatch, REPLIES[cls])
+    calls = fake_transport(monkeypatch, reply_for(cls))
     with pytest.raises(ProviderError, match=f"{variable} holds") as refused:
         cls(Agent()).generate("p", images=(), names=("done",), attempt=tmp_path / "a", tick=lambda: None,
                               cancelled=lambda: False)
