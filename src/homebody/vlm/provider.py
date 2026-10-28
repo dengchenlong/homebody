@@ -243,7 +243,7 @@ def run_request(name: str, url: str, headers: Mapping[str, str], body: dict, *, 
     with recorded_attempt(attempt, prompt, body.get("model")):
         (attempt / "request.json").write_text(json.dumps(redacted or body, indent=2))
         request = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST",
-                                         headers=dict(headers))
+                                         headers={**dict(headers), "User-Agent": "homebody/0.1"})
         outcome: dict = {}
 
         def post():

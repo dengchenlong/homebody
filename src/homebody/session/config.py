@@ -95,6 +95,7 @@ MODELS = {
     "luna-api": ("openai-api", "gpt-5.6-luna", None),
     "terra": ("codex", "gpt-5.6-terra", "high"),
     "terra-api": ("openai-api", "gpt-5.6-terra", None),
+    "glm": ("glm-api", "glm-5.3-flash", None),
     "opus": ("claude-code", "claude-opus-5-5", "high"),
     "opus-api": ("claude-api", "claude-opus-5-5", None),
     "fable": ("claude-code", "claude-fable-5-1", "high"),

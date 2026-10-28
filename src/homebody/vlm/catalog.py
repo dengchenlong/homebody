@@ -1,11 +1,11 @@
 """The decision providers by name. A provider class names itself (LABEL), what it needs (EXECUTABLE or KEY) and, for a CLI, its effort."""
 from homebody.session.settings import Agent
 
-from .api import ClaudeApi, OpenAiApi
+from .api import ClaudeApi, GlmApi, OpenAiApi
 from .claude import ClaudeCode
 from .codex import Codex
 
-PROVIDERS = {"codex": Codex, "claude-code": ClaudeCode, "openai-api": OpenAiApi, "claude-api": ClaudeApi}
+PROVIDERS = {"codex": Codex, "claude-code": ClaudeCode, "openai-api": OpenAiApi, "claude-api": ClaudeApi, "glm-api": GlmApi}
 
 
 def make(settings: Agent):

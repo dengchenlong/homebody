@@ -86,6 +86,48 @@ class OpenAiApi:
         return Decision.parse(content, names)
 
 
+class GlmApi(OpenAiApi):
+    """[OI]-compatible Chat Completions at a relay base URL; the decision and key work as [OI].
+    The relay ignores strict json_schema responses, so it asks for plain JSON and strips fences."""
+    URL = "https://api-slb.micuapi.ai/v1/chat/completions"
+    LABEL, KEY = "GLM", "GLM_API_KEY"
+
+    def request(self, prompt: str, images: tuple[Path, ...], names: tuple[str, ...]) -> dict:
+        body = super().request(prompt, images, names)
+        body["messages"][0]["content"].append(
+            {"type": "text", "text": 'Reply with ONLY one JSON object with the keys '
+             '"text", "skill" and "arguments_json". No markdown fences.'})
+        body["response_format"] = {"type": "json_object"}
+        return body
+
+    def generate(self, prompt: str, *, images: tuple[Path, ...], names: tuple[str, ...],
+                 attempt: Path, tick: Callable[[], None], cancelled: Callable[[], bool]) -> Decision:
+        headers = {"Authorization": f"Bearer {key(self.KEY)}", "content-type": "application/json"}
+        body = self.request(prompt, images, names)
+        reply = run_request("GLM API", self.URL, headers, body, prompt=prompt, attempt=attempt,
+                            timeout=self.settings.timeout, tick=tick, cancelled=cancelled,
+                            redacted=redact(body, images))
+        try:
+            content = reply["choices"][0]["message"]["content"]
+            if isinstance(content, list):  # some relays return the parts array, not a string
+                content = "".join(part.get("text", "") for part in content if isinstance(part, dict))
+        except (KeyError, IndexError, TypeError) as exc:
+            raise ProviderError(f"GLM API returned no decision: {json.dumps(reply)[:500]}") from exc
+        if not isinstance(content, str):
+            raise ProviderError(f"GLM API returned a {type(content).__name__} decision: {json.dumps(reply)[:500]}")
+        content = content.strip()
+        if content.startswith("```"):
+            content = content.strip("`").removeprefix("json").strip()
+        start = content.find("{")  # some replies narrate before the JSON object
+        if start > 0:
+            content = content[start:]
+        value = json.loads(content)  # this relay sometimes returns arguments_json as an object
+        if isinstance(value, dict) and isinstance(value.get("arguments_json"), dict):
+            value["arguments_json"] = json.dumps(value["arguments_json"])
+            content = json.dumps(value)
+        return Decision.parse(content, names)
+
+
 def redact(body: dict, images: tuple[Path, ...]) -> dict:
     """The request as recorded: image bytes replaced by the image file names, in order."""
     names = iter(image.name for image in images)
