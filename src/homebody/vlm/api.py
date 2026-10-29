@@ -76,14 +76,17 @@ class OpenAiApi:
                  attempt: Path, tick: Callable[[], None], cancelled: Callable[[], bool]) -> Decision:
         headers = {"Authorization": f"Bearer {key(self.KEY)}", "content-type": "application/json"}
         body = self.request(prompt, images, names)
-        reply = run_request("OpenAI API", self.URL, headers, body, prompt=prompt, attempt=attempt,
+        reply = run_request(f"{self.LABEL} API", self.URL, headers, body, prompt=prompt, attempt=attempt,
                             timeout=self.settings.timeout, tick=tick, cancelled=cancelled,
                             redacted=redact(body, images))
+        return Decision.parse(self.content(reply), names)
+
+    def content(self, reply: dict) -> str:
+        """The decision text in a Chat Completions reply."""
         try:
-            content = reply["choices"][0]["message"]["content"]
+            return reply["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
-            raise ProviderError(f"OpenAI API returned no decision: {json.dumps(reply)[:500]}") from exc
-        return Decision.parse(content, names)
+            raise ProviderError(f"{self.LABEL} API returned no decision: {json.dumps(reply)[:500]}") from exc
 
 
 class GlmApi(OpenAiApi):
@@ -100,21 +103,14 @@ class GlmApi(OpenAiApi):
         body["response_format"] = {"type": "json_object"}
         return body
 
-    def generate(self, prompt: str, *, images: tuple[Path, ...], names: tuple[str, ...],
-                 attempt: Path, tick: Callable[[], None], cancelled: Callable[[], bool]) -> Decision:
-        headers = {"Authorization": f"Bearer {key(self.KEY)}", "content-type": "application/json"}
-        body = self.request(prompt, images, names)
-        reply = run_request("GLM API", self.URL, headers, body, prompt=prompt, attempt=attempt,
-                            timeout=self.settings.timeout, tick=tick, cancelled=cancelled,
-                            redacted=redact(body, images))
-        try:
-            content = reply["choices"][0]["message"]["content"]
-            if isinstance(content, list):  # some relays return the parts array, not a string
-                content = "".join(part.get("text", "") for part in content if isinstance(part, dict))
-        except (KeyError, IndexError, TypeError) as exc:
-            raise ProviderError(f"GLM API returned no decision: {json.dumps(reply)[:500]}") from exc
+    def content(self, reply: dict) -> str:
+        """The relay's reply, normalised: a parts array joined, fences and narration stripped, an
+        object arguments_json stringified."""
+        content = super().content(reply)
+        if isinstance(content, list):  # some relays return the parts array, not a string
+            content = "".join(part.get("text", "") for part in content if isinstance(part, dict))
         if not isinstance(content, str):
-            raise ProviderError(f"GLM API returned a {type(content).__name__} decision: {json.dumps(reply)[:500]}")
+            raise ProviderError(f"{self.LABEL} API returned a {type(content).__name__} decision: {json.dumps(reply)[:500]}")
         content = content.strip()
         if content.startswith("```"):
             content = content.strip("`").removeprefix("json").strip()
@@ -125,7 +121,7 @@ class GlmApi(OpenAiApi):
         if isinstance(value, dict) and isinstance(value.get("arguments_json"), dict):
             value["arguments_json"] = json.dumps(value["arguments_json"])
             content = json.dumps(value)
-        return Decision.parse(content, names)
+        return content
 
 
 def redact(body: dict, images: tuple[Path, ...]) -> dict:
