@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import threading
 
-from .joints import rad_to_deg
+from .joints import to_wire_degrees
 from .profile import (
     SERVICE_ARM_CTRL_MODE,
     SERVICE_MPC_CTRL_MODE,
@@ -126,38 +126,31 @@ class KuavoPort:
         msg.linear.x, msg.linear.y, msg.angular.z = forward, lateral, yaw_rate
         self._pub_cmd_vel.publish(msg)
 
-    def publish_arm_traj(self, left_deg, right_deg) -> None:
-        """One 14-degree JointState: left 7 then right 7, both in degrees."""
+    def publish_arm_traj(self, left_rad, right_rad) -> None:
+        """One 14-position JointState: left 7 then right 7. The wire speaks degrees, so
+        the radians cross through joints.to_wire_degrees here, the only crossing."""
         msg = self._JointState()
         msg.name = [f"zarm_l{i}_joint" for i in range(1, 8)] \
             + [f"zarm_r{i}_joint" for i in range(1, 8)]
-        msg.position = [rad_to_deg(v) if abs(v) < 3.5 else float(v) for v in left_deg + right_deg]
+        msg.position = to_wire_degrees("left", left_rad) + to_wire_degrees("right", right_rad)
         self._pub_arm_traj.publish(msg)
 
     # --- services
-    def call_service(self, name: str, request) -> object:
-        self._rospy.wait_for_service(name, timeout=5.0)
-        proxy = self._rospy.ServiceProxy(name, type(request._response_class)
-                                         if hasattr(request, "_response_class") else None)
-        return proxy
-
     def set_arm_ctrl_mode(self, mode: int) -> bool:
         """0 fixed / 1 auto-swing / 2 external, through the wheel-arm service."""
-        request = self._changeArmCtrlMode._request_class()
-        request.control_mode = mode
-        response = self._service(SERVICE_ARM_CTRL_MODE, self._changeArmCtrlMode, request)
+        response = self._service(SERVICE_ARM_CTRL_MODE, self._changeArmCtrlMode, mode)
         return bool(response.result)
 
     def set_mpc_ctrl_mode(self, mode: int) -> bool:
         """1 arm-only / 3 base+arm, the permission the arm obeys."""
-        request = self._changeTorsoCtrlMode._request_class()
-        request.control_mode = mode
-        response = self._service(SERVICE_MPC_CTRL_MODE, self._changeTorsoCtrlMode, request)
+        response = self._service(SERVICE_MPC_CTRL_MODE, self._changeTorsoCtrlMode, mode)
         return bool(response.result)
 
-    def _service(self, name: str, srv_type, request):
+    def _service(self, name: str, srv_type, mode: int):
         self._rospy.wait_for_service(name, timeout=5.0)
         proxy = self._rospy.ServiceProxy(name, srv_type)
+        request = srv_type._request_class()
+        request.control_mode = mode
         return proxy(request)
 
     def enable_control(self) -> bool:

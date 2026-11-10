@@ -13,7 +13,7 @@ import numpy as np
 
 from homebody.primitives.actions import ActionRejected
 
-from .joints import from_sensor_radians, to_wire_degrees
+from .joints import from_sensor_radians
 from .limits import arm_limits
 from .port import KuavoPort
 from .profile import (
@@ -21,7 +21,7 @@ from .profile import (
     BASE_MAX_ANGULAR_RPS,
     BASE_MAX_LINEAR_MPS,
     DEADMAN_S,
-    MPC_ARM_ONLY,
+    MPC_BASE_ARM,
 )
 from .safety import ArmGate
 
@@ -128,11 +128,11 @@ class KuavoBackend:
         return self._deadman_s if last is None else min(max(now - last, 0.0), self._deadman_s)
 
     def _send_arm(self, side: str, q_cmd: np.ndarray) -> None:
-        """Send one side's clamped block; the wire takes both blocks, degrees."""
+        """Send one side's clamped block; the wire takes both blocks, radians in, and
+        the port converts to degrees at the only crossing."""
         left = self._gates["left"]._q_cmd if side == "right" else q_cmd
         right = q_cmd if side == "right" else self._gates["right"]._q_cmd
-        self._port.publish_arm_traj(to_wire_degrees("left", left),
-                                    to_wire_degrees("right", right))
+        self._port.publish_arm_traj(left, right)
 
     # --- the protocol's reset/close pair
     def reset(self) -> None:
@@ -151,8 +151,12 @@ class KuavoBackend:
         raise ActionRejected("The kuavo 5W v1 has no gripper channel")
 
     def ensure_arm_control(self) -> None:
-        """The MPC mode and external-control switch, in the order the controller wants."""
-        if not self._port.set_mpc_ctrl_mode(MPC_ARM_ONLY):
+        """The MPC mode and external-control switch, in the order the controller wants.
+
+        BASE_ARM, not ARM_ONLY: the demo drives the base and the arms together, and a
+        permission the controller lacks shows up as success with motionless arms.
+        """
+        if not self._port.set_mpc_ctrl_mode(MPC_BASE_ARM):
             raise ActionRejected("The controller refused the manipulation MPC mode")
         if not self._port.set_arm_ctrl_mode(ARM_EXTERNAL):
             raise ActionRejected("The controller refused the external-control mode")

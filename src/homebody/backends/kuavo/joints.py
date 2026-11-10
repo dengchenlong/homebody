@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import math
 
-from .profile import ARM_JOINTS, WIRE_JOINT_ORDER
+from .profile import WIRE_JOINT_ORDER
 
 __all__ = ["deg_to_rad", "from_sensor_radians", "rad_to_deg", "to_wire_degrees"]
 
@@ -38,8 +38,7 @@ def from_sensor_radians(sensor_q) -> dict[str, tuple[float, ...]]:
     q = list(sensor_q)
     if len(q) != 20:
         raise ValueError(f"sensor vector needs 20 joints, got {len(q)}")
-    names = list(ARM_JOINTS["left"]) + list(ARM_JOINTS["right"])
     return {
         "left": tuple(float(q[i]) for i in range(4, 11)),
         "right": tuple(float(q[i]) for i in range(11, 18)),
-    } if names else {}
+    }
