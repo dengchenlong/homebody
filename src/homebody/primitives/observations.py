@@ -43,6 +43,38 @@ MIN_TARGET_PIXELS = 12
 ARMS = slice(15, 29)
 ARM = {"left": slice(15, 22), "right": slice(22, 29)}
 
+
+@dataclass(frozen=True)
+class JointLayout:
+    """One robot's joint vector: its length and each arm's slice inside it.
+
+    Backends supply the layout their wire speaks; the observation records read it instead
+    of hard-coded offsets. The G1 layout (ARMS/ARM above) stays the default.
+    """
+    joints: int
+    arms: slice
+    arm: Mapping[str, slice]
+
+    def __post_init__(self):
+        if self.joints <= 0 or self.arms.stop > self.joints:
+            raise ValueError("Layout arms must fall inside the joint vector")
+        sides = tuple(self.arm)
+        if sides != ("left", "right"):
+            raise ValueError("Layout arms must be exactly left and right")
+        for side, arm_slice in self.arm.items():
+            if arm_slice.stop - arm_slice.start != 7 or arm_slice.stop > self.joints:
+                raise ValueError(f"The {side} arm slice must cover seven joints")
+
+
+def g1_layout() -> JointLayout:
+    """The G1's 29 joints in controller order, arms at 15..28."""
+    return JointLayout(29, ARMS, dict(ARM))
+
+
+def kuavo_layout() -> JointLayout:
+    """The Kuavo 5W's 20-sensor vector: lift 4, arms 4..17, head 2."""
+    return JointLayout(20, slice(4, 18), {"left": slice(4, 11), "right": slice(11, 18)})
+
 @dataclass(frozen=True)
 class HandState:
     """One hand's closure in [0, 1] and per-finger evidence ordered thumb, index, middle.
@@ -98,7 +130,7 @@ class RobotState:
         return self.epoch, self.sequence
 
     def arm_joints(self, side):
-        return self.joints[ARM[side]]
+        return self.joints[self.layout.arm[side]]
 
     def palm(self, arm, side):
         """World pose of this side's palm from the measured arm joints."""
@@ -116,10 +148,13 @@ class Measurement(RobotState):
     base_pose: np.ndarray
     joints: np.ndarray
     hands: Mapping[str, HandState]
+    layout: JointLayout | None = None
 
     def __post_init__(self):
+        if self.layout is None:
+            object.__setattr__(self, "layout", g1_layout())
         for name, shape in (("world_camera", (4, 4)), ("world_torso", (4, 4)), ("base_pose", (3,)),
-                            ("joints", (29,))):
+                            ("joints", (self.layout.joints,))):
             object.__setattr__(self, name, frozen_array(getattr(self, name), shape))
         object.__setattr__(self, "hands", MappingProxyType(dict(self.hands)))
 
@@ -146,13 +181,16 @@ class Frame(RobotState):
     hands: Mapping[str, HandState]
     labels: np.ndarray
     navigation: NavigationMap
+    layout: JointLayout | None = None
 
     def __post_init__(self):
+        if self.layout is None:
+            object.__setattr__(self, "layout", g1_layout())
         height, width = np.shape(self.depth)
         for name, shape in (("rgb", (height, width, 3)), ("depth", (height, width)),
                             ("labels", (height, width)), ("intrinsics", (3, 3)),
                             ("world_camera", (4, 4)), ("world_torso", (4, 4)),
-                            ("base_pose", (3,)), ("joints", (29,))):
+                            ("base_pose", (3,)), ("joints", (self.layout.joints,))):
             object.__setattr__(self, name, frozen_array(getattr(self, name), shape))
         object.__setattr__(self, "hands", MappingProxyType(dict(self.hands)))
 

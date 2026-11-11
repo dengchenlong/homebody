@@ -138,10 +138,12 @@ class Settings:
 
     @classmethod
     def load(cls, path: Path | None = None, scene: Path | None = None,
-             override: Path | None = None) -> "Settings":
-        """Base settings, then the scene package's `settings.toml`, then OVERRIDE (FileNotFoundError when missing). Tables merge key by key, anything else replaces."""
+             override: Path | None = None, robot: Path | None = None) -> "Settings":
+        """Base settings, then the robot's own overrides, then the scene package's
+        `settings.toml`, then OVERRIDE (FileNotFoundError when missing). Tables merge key
+        by key, anything else replaces."""
         raw = tomllib.loads(path.read_text()) if path else {}
-        for overlay in (scene / "settings.toml" if scene else None, override):
+        for overlay in (robot, scene / "settings.toml" if scene else None, override):
             if overlay and overlay.is_file():
                 for name, section in tomllib.loads(overlay.read_text()).items():
                     tables = isinstance(section, dict) and isinstance(raw.get(name, {}), dict)

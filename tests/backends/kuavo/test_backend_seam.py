@@ -20,9 +20,13 @@ class FakePort:
         self.arm_traj = []
         self.clock_value = 100.0
         self.closed = False
+        self.odom_value = None
 
     def sensors(self):
         return {"joint_q": self.joint_q, "joint_v": [0.0] * 20}
+
+    def odom(self):
+        return self.odom_value
 
     def clock(self):
         return self.clock_value
@@ -148,10 +152,11 @@ def test_grip_refused_on_v1():
         backend.grip(1, "left", 0.5)
 
 
-def test_snapshot_refused_until_m3():
+def test_snapshot_returns_a_blank_frame_until_a_camera_is_wired():
+    """M1's placeholder refused; M3 keeps the loop alive with a valid, empty frame."""
     backend, _ = make_backend()
-    with pytest.raises(RuntimeError, match="M3"):
-        backend.snapshot()
+    frame = backend.snapshot()
+    assert frame.joints.shape == (20,)
 
 
 def test_reset_starts_new_epoch():

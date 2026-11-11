@@ -131,7 +131,7 @@ class Recorder:
         self._task_count += 1
         path.mkdir(parents=True)
         self._task_path = path
-        self._physics = (path / "physics.jsonl").open("a", buffering=1)
+        self._physics = None
         self._pending_physics = None
         write_json(path / "task.json", {"task": task, "epoch": epoch, "started_unix": time.time()})
         self.event("task_started", task=task, epoch=epoch, path=path.relative_to(self.path))
@@ -144,7 +144,9 @@ class Recorder:
     def physics(self, state: dict):
         """Coalesce same-instant callbacks without erasing any failure evidence."""
         if self._physics is None:
-            return
+            if self._task_path is None:
+                return
+            self._physics = (self._task_path / "physics.jsonl").open("a", buffering=1)
         current = json.loads(json.dumps(state, default=json_value, allow_nan=False))
         previous = self._pending_physics
         if previous is not None and (previous["epoch"], previous["time"]) == (
@@ -166,7 +168,8 @@ class Recorder:
         if self._task_path is None:
             return
         self._flush_physics()
-        self._physics.close()
+        if self._physics is not None:
+            self._physics.close()
         self._physics = None
         path, self._task_path = self._task_path, None
         write_json(path / "outcome.json", {**outcome, "finished_unix": time.time(),

@@ -56,3 +56,20 @@ def test_skill_sample_period_matches_executed_control_clock():
     for tick in (.05, .001):
         with pytest.raises(ValueError, match="controller periods"):
             Settings(servo=Servo(tick=tick))
+
+
+def test_the_robot_layer_overrides_the_base_and_yields_to_the_scene_and_override(tmp_path):
+    from homebody.session.settings import Settings
+
+    base = tmp_path / "base.toml"
+    base.write_text("[motion]\nrobot_radius = 0.20\ndrive_speed = 0.35\n")
+    robot = tmp_path / "robot.toml"
+    robot.write_text("[motion]\nrobot_radius = 0.28\n")
+    scene = tmp_path / "scene"
+    scene.mkdir()
+    (scene / "settings.toml").write_text("[motion]\ndrive_speed = 0.30\n")
+    override = tmp_path / "override.toml"
+    override.write_text("[motion]\nrobot_radius = 0.32\n")
+    settings = Settings.load(base, scene=scene, override=override, robot=robot)
+    assert settings.motion.robot_radius == 0.32  # the explicit override wins
+    assert settings.motion.drive_speed == 0.30   # then the scene, then the robot layer

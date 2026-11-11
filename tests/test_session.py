@@ -887,3 +887,22 @@ def test_busy_retries_run_out_and_other_errors_are_not_retried(build):
     broken = BusyThenAnswers([], busy=9, error=ProviderError("Codex exited 1: invalid schema"))
     session = build(broken)
     assert session.run_task("Inspect")["status"] == "provider_error" and broken.calls == 1
+
+
+class SensorOnlyBackend(Backend):
+    """A real-robot backend: no evaluation_state, no set_evaluation_sink — the session
+    must skip scorer capture instead of treating the backend as broken."""
+    EVALUATES = False
+
+    def set_evaluation_sink(self, sink):
+        raise AssertionError("set_evaluation_sink must not be called on a backend without evaluation")
+
+    def evaluation_state(self):
+        raise AssertionError("evaluation_state must not be called on a backend without evaluation")
+
+
+def test_a_backend_without_evaluation_state_records_no_physics_rows(build):
+    session = build(Provider([Decision("Finished", "done", {})]), backend=SensorOnlyBackend())
+    assert session.run_task("Say done")["status"] == "model_done"
+    assert session.backend.state_calls == 0
+    assert not list(session.recorder.path.glob("tasks/*/physics.jsonl"))

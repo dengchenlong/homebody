@@ -1,7 +1,10 @@
-"""The Kuavo 5W backend: epoch-guarded wheel-base and arm commands over KuavoPort.
+"""The Kuavo 5W backend: a full Robot implementation over KuavoPort.
 
-Signatures align with the Robot protocol, but the data classes stay kuavo-native until
-Phase 2 parameterizes the 29-joint assumption; snapshot() and grip() refuse until then.
+One commander at a time: an epoch guards every command, a deadman stops the base, the
+arm gates clamp every target before it reaches the wire. Observations translate at this
+boundary into homebody-native records under the Kuavo joint layout; the camera is not
+wired yet, so snapshot() returns a valid blank frame (no depth, no labels) and grip()
+refuses — the 5W v1 has no gripper channel.
 """
 from __future__ import annotations
 
@@ -11,7 +14,16 @@ import time as _time
 
 import numpy as np
 
+from homebody.helpers.geometry import transform
 from homebody.primitives.actions import ActionRejected
+from homebody.primitives.observations import (
+    Frame,
+    HandState,
+    JointLayout,
+    Measurement,
+    NavigationMap,
+    kuavo_layout,
+)
 
 from .joints import from_sensor_radians
 from .limits import arm_limits
@@ -27,19 +39,37 @@ from .safety import ArmGate
 
 __all__ = ["KuavoBackend"]
 
+# The session reads this before touching the scorer's evaluation surface: a real-robot
+# backend records its own sensors, never simulator-only physics state.
+EVALUATES = False
+
+_BLANK_INTRINSICS = np.diag([1.0, 1.0, 1.0]).astype(float)  # no camera: pixels carry no metric
+# Until a scanned map is wired in (M2's on-site work), navigate plans over the same
+# open fallback raster the MuJoCo backend uses when no scene package is given.
+_BLANK_MAP = NavigationMap(np.zeros((200, 200), dtype=bool),
+                           np.array([[.025, 0, -2.5], [0, -.025, 2.5], [0, 0, 1]]), .025)
+
+
+def _blank_hand() -> HandState:
+    """The gripper-less hand: closed-empty zero state; retention evidence never appears."""
+    return HandState(np.zeros(7), 0.0, np.zeros(3), np.zeros(3))
+
 
 class KuavoBackend:
     """One commander at a time: an epoch guards every command, a deadman stops the base,
     the arm gates clamp every target before it reaches the wire."""
 
-    def __init__(self, port: KuavoPort | None = None, urdf=None, deadman_s: float = DEADMAN_S):
+    def __init__(self, port: KuavoPort | None = None, urdf=None, deadman_s: float = DEADMAN_S,
+                 layout: JointLayout | None = None):
         self._port = port if port is not None else KuavoPort()
         self._deadman_s = float(deadman_s)
+        self.layout = kuavo_layout() if layout is None else layout
         limits = arm_limits(urdf) if urdf is not None else None
         self._limits: dict[str, tuple[tuple[float, ...], tuple[float, ...]]] = {}
         self._gates: dict[str, ArmGate] = {}
         self._last_arm_time: dict[str, float] = {}
         self._epoch = 0
+        self._sequence = 0
         self._arm_active = False
         self._last_cmd_vel = 0.0
         self._stop_lock = threading.Lock()
@@ -51,14 +81,20 @@ class KuavoBackend:
                 self._limits[side] = (lower, upper)
                 self._gates[side] = ArmGate(lower, upper)
 
-    # --- the Robot protocol's surface, minus Frame/Measurement (Phase 2)
+    # --- the Robot protocol's observation surface
     @property
     def epoch(self) -> int:
         return self._epoch
 
+    @property
+    def time(self) -> float:
+        """This backend runs in real time: the monotonic wall clock stamps every frame."""
+        return _time.monotonic()
+
     def new_epoch(self) -> int:
         """An operator stop starts a new generation and refuses older commands."""
         self._epoch += 1
+        self._sequence = 0
         self._stop_base()
         self._arm_active = False
         return self._epoch
@@ -105,6 +141,50 @@ class KuavoBackend:
             raise ActionRejected("Advance duration must be between zero and one second")
         _time.sleep(result)
 
+    def snapshot(self) -> Frame:
+        """One synchronized frame. No camera is wired yet, so the images hold nothing:
+        black rgb, no metric depth, no labels — navigation still routes, and any skill
+        that needs a click is refused at its own argument check."""
+        sensors = self._port.sensors()
+        if sensors is None:
+            raise ActionRejected("No sensor frame yet")
+        joints = np.asarray(sensors["joint_q"], dtype=float)
+        blank = np.full((8, 8), np.nan, dtype=float)
+        return Frame(self.epoch, self._sequence, self.time,
+                     np.zeros((*blank.shape, 3), dtype=np.uint8), blank, _BLANK_INTRINSICS,
+                     transform(self._camera_position()),
+                     transform([0.0, 0.0, 0.0]),
+                     self._base_pose(), joints,
+                     {side: _blank_hand() for side in ("left", "right")},
+                     np.zeros(blank.shape, dtype=np.int32), _BLANK_MAP, layout=self.layout)
+
+    def measure(self) -> Measurement:
+        sensors = self._port.sensors()
+        if sensors is None:
+            raise ActionRejected("No sensor frame yet")
+        self._sequence += 1
+        joints = np.asarray(sensors["joint_q"], dtype=float)
+        return Measurement(self.epoch, self._sequence, self.time,
+                           transform(self._camera_position()), transform([0.0, 0.0, 0.0]),
+                           self._base_pose(), joints,
+                           {side: _blank_hand() for side in ("left", "right")},
+                           layout=self.layout)
+
+    def _camera_position(self):
+        """The head camera sits ahead and above the base by the biped_s62 mounting offset;
+        without a wired camera its exact pose is placeholder, so keep it at the base."""
+        return [0.0, 0.0, 0.0]
+
+    def _base_pose(self):
+        """[x, y, yaw] on the map from the odometry's position and orientation."""
+        odom = self._port.odom()
+        if odom is None:
+            return np.zeros(3)
+        qx, qy, qz, qw = (float(v) for v in odom["orientation"])
+        yaw = math.atan2(2.0 * (qw * qz + qx * qy), 1.0 - 2.0 * (qy * qy + qz * qz))
+        position = odom["position"]
+        return np.array([float(position[0]), float(position[1]), yaw])
+
     def stop(self, epoch: int) -> None:
         self._check_epoch(epoch)
         self._stop_base()
@@ -142,10 +222,6 @@ class KuavoBackend:
         self._closed = True
         self._stop_base()
         self._port.close()
-
-    # --- Phase 2 placeholders, explicit about what is missing
-    def snapshot(self):
-        raise RuntimeError("Kuavo camera access lands in M3 (Phase 2)")
 
     def grip(self, epoch: int, side: str, closure: float) -> None:
         raise ActionRejected("The kuavo 5W v1 has no gripper channel")

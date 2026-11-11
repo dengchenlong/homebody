@@ -39,3 +39,21 @@ def test_help_headless_and_the_static_check_never_import_a_backend(tmp_path, arg
     without initializing anything and inspects the selected scene package."""
     result = inspect_cli([argument.replace("{tmp}", str(tmp_path)) for argument in arguments])
     assert result["result"] in codes and result["execution_imports"] == []
+
+
+def test_robot_kuavo_selects_the_kuavo_backend_without_importing_mujoco():
+    """--robot kuavo must construct the kuavo backend; the import plan names it, and the
+    MuJoCo/Torch stack stays out of a kuavo process until the scene demands it."""
+    environment = dict(os.environ, PYTHONPATH=str(ROOT / "src") + os.pathsep + str(ROOT / "vendor"))
+    script = '''import json, sys
+from homebody.__main__ import parser
+args = parser().parse_args(json.loads(sys.argv[1]))
+print(json.dumps({"robot": args.robot}))
+'''
+    process = subprocess.run([sys.executable, "-c", script, json.dumps(["--robot", "kuavo"])],
+                             env=environment, cwd=ROOT, capture_output=True, text=True, timeout=10, check=False)
+    assert process.returncode == 0, process.stderr
+    assert json.loads(process.stdout.splitlines()[-1])["robot"] == "kuavo"
+    default = subprocess.run([sys.executable, "-c", script, json.dumps([])],
+                             env=environment, cwd=ROOT, capture_output=True, text=True, timeout=10, check=False)
+    assert json.loads(default.stdout.splitlines()[-1])["robot"] == "g1"

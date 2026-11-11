@@ -119,6 +119,14 @@ class Session:
         self.history = []
         self.status = "Ready"
         self._physics_fault = None
+        self._evaluates = (callable(getattr(backend, "evaluation_state", None)) and
+                           callable(getattr(backend, "set_evaluation_sink", None)) and
+                           getattr(backend, "EVALUATES", True))
+
+    def _capture_physics(self):
+        """The backend's physics sample for the scorer, or nothing without evaluation state."""
+        if self._evaluates:
+            self.recorder.physics(self.backend.evaluation_state())
 
     @property
     def requires_reset(self):
@@ -229,7 +237,8 @@ class Session:
         try:
             if self.requires_reset:
                 raise PhysicsInvalid(self._physics_fault[1])
-            self.backend.set_evaluation_sink(self.recorder.physics)
+            if self._evaluates:
+                self.backend.set_evaluation_sink(self.recorder.physics)
             names = tuple(PROMPTS) + ("done",)
             for step in range(self.settings.agent.max_steps):
                 if self.controls.cancel.is_set():
@@ -287,10 +296,11 @@ class Session:
             except Exception as exc:  # noqa: BLE001 -- Cleanup must retain terminal evidence.
                 cleanup_errors.append(f"{type(exc).__name__}: {exc}")
             try:
-                self.recorder.physics(self.backend.evaluation_state())
+                self._capture_physics()
             except Exception as exc:  # noqa: BLE001 -- Preserve failure if final sensors are lost.
                 cleanup_errors.append(f"{type(exc).__name__}: {exc}")
-            self.backend.set_evaluation_sink(None)
+            if self._evaluates:
+                self.backend.set_evaluation_sink(None)
             if cleanup_errors:
                 outcome.update(status="error", status_before_cleanup=outcome["status"],
                                cleanup_error="; ".join(cleanup_errors))
@@ -332,7 +342,8 @@ class Session:
                     self.update("Stopped", "Enter another task when ready.")
                 self.controls.cancel.clear()
             elif command.name == "reset":
-                self.backend.set_evaluation_sink(None)
+                if self._evaluates:
+                    self.backend.set_evaluation_sink(None)
                 if self.ui is not None:
                     self.ui.clear_view()
                 try:

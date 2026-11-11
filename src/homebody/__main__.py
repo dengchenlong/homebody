@@ -36,6 +36,9 @@ def parser():
     value.add_argument("--place-object", action="append", default=[], metavar="NAME=X,Y,YAW",
                        help="Start a movable object upright at map X, Y (m) and YAW (rad) on the "
                             "surface there instead of its scanned position; repeatable")
+    value.add_argument("--robot", choices=("g1", "kuavo"), default="g1",
+                       help="The robot to drive (default g1, the MuJoCo-simulated G1; "
+                            "kuavo drives the Kuavo 5W over its ROS topics)")
     value.add_argument("--headless", action="store_true", help="Run one explicit task without UI")
     value.add_argument("--host", default="127.0.0.1", help="The console's address (default 127.0.0.1)")
     value.add_argument("--port", type=int, default=8080, help="The console's port (default 8080)")
@@ -103,16 +106,42 @@ def provider_check(settings, output):
         print(f"Provider evidence: {path}")
 
 
-def run(args, settings, output):
+def build_backend(args, settings):
+    """The selected robot's backend: G1 in MuJoCo, or the Kuavo 5W over its ROS topics."""
+    if args.robot == "kuavo":
+        from homebody.backends.kuavo.backend import KuavoBackend
+        from homebody.backends.kuavo.profile import urdf_path
+
+        backend = KuavoBackend(urdf=urdf_path())
+        backend.ensure_arm_control()
+        return backend
     from homebody.backends.mujoco import MujocoBackend
+
+    return MujocoBackend(args.root, settings, scene=args.scene, spawns=args.spawns)
+
+
+def robot_skills_assets(args, settings):
+    """The per-robot Arm kinematics and jaw samples skills plan with; empty for a robot
+    whose arm chain or gripper calibration is not part of this release yet."""
+    if args.robot != "g1":
+        return {}, {}
     from homebody.helpers.kinematics import Arm
+
+    urdf = args.root / "assets/robot/g1_29dof_with_hand.urdf"
+    calibration = json.loads((args.root / "assets/robot/calibration.json").read_text())
+    return ({side: Arm(urdf, side) for side in ("left", "right")},
+            calibration["jaw_samples"])
+
+
+def run(args, settings, output):
     from homebody.session.recorder import Recorder
     from homebody.session.session import Session
     from homebody.ui.console import Console, Controls
     from homebody.vlm.observations import semantic_prior
 
     recorder = Recorder(args.root, settings, output)
-    recorder.event("scene_package", path=str(args.scene), object_spawns=args.spawns)
+    recorder.event("scene_package", path=str(args.scene), object_spawns=args.spawns,
+                   robot=args.robot)
     backend = ui = None
     assembled = False
     controls = Controls()
@@ -124,22 +153,22 @@ def run(args, settings, output):
                          scene_name=task_scene.get("name", "Simulation"),
                          model_name=model_label(settings.agent),
                          topdown_settings=settings.topdown, render_in_background=True)
-        backend = MujocoBackend(args.root, settings, scene=args.scene, spawns=args.spawns)
+        backend = build_backend(args, settings)
         scene_update = None
-        if ui is not None:
+        if ui is not None and args.robot == "g1":
             from homebody.ui.scene import SceneView
             ui.scene_view = SceneView(ui.server, backend)
             scene_update = ui.scene_view.update
-        urdf = args.root / "assets/robot/g1_29dof_with_hand.urdf"
-        arms = {side: Arm(urdf, side) for side in ("left", "right")}
+        arms, jaw_samples = robot_skills_assets(args, settings)
         if ui is not None:
             ui.arms = arms
-        calibration = json.loads((args.root / "assets/robot/calibration.json").read_text())
         provider = make(settings.agent)
         session = Session(backend, provider, settings, recorder, controls,
-                          arms=arms, jaw_samples=calibration["jaw_samples"], ui=ui,
-                          observer_frame=backend.observer_frame if args.headless else None,
-                          shoulder_frame=backend.shoulder_frame if args.headless else None,
+                          arms=arms, jaw_samples=jaw_samples, ui=ui,
+                          observer_frame=getattr(backend, "observer_frame", None)
+                          if args.headless else None,
+                          shoulder_frame=getattr(backend, "shoulder_frame", None)
+                          if args.headless else None,
                           scene_update=scene_update, real_time=ui is not None,
                           semantic_context=semantic_prior(args.scene))
         assembled = True
@@ -216,7 +245,9 @@ def main(argv=None):
             value.error(f"--place-object: no movable object {', '.join(unknown)}; "
                         f"this environment's are {', '.join(movable)}")
     try:
-        settings = Settings.load(args.root / "configs/simulation.toml", scene=args.scene, override=args.settings)
+        robot_settings = (args.root / "configs/robot_kuavo.toml") if args.robot == "kuavo" else None
+        settings = Settings.load(args.root / "configs/simulation.toml", scene=args.scene,
+                                 override=args.settings, robot=robot_settings)
     except (ValueError, TypeError, KeyError, OSError) as error:
         value.error(f"settings: {error}")
     if args.model:

@@ -1,0 +1,11 @@
+# The Kuavo 5W's overrides on top of configs/simulation.toml: only the numbers this
+# robot's own limits and sensors set. Omitted settings take the base chain's values.
+# The wheel base holds a commanded velocity precisely, so navigation's tuned overshoot
+# margins for a stepping gait come back to the conservative defaults.
+
+[motion]
+robot_radius = 0.28
+route_clearance_margin = 0.0
+aim_in_distance = 0.80
+min_close_speed = 0.15
+final_speed = 0.20
