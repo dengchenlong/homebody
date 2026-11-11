@@ -46,6 +46,9 @@ class KuavoPort:
         except ImportError:
             _raise_ros_missing()
             raise  # unreachable; keeps the names defined for type checkers
+        # Every publish/subscribe needs a node; the port owns the name so callers
+        # never touch rospy. disable_signals keeps this safe in threaded contexts.
+        rospy.init_node("homebody_kuavo", disable_signals=True, anonymous=True)
         self._rospy = rospy
         self._Twist, self._JointState, self._Odometry, self._Float32 = (
             Twist, JointState, Odometry, Float32)
@@ -65,15 +68,20 @@ class KuavoPort:
                                              tcp_nodelay=True)
 
     # --- callbacks
+    @staticmethod
+    def _vector3(v) -> list[float]:
+        return [float(v.x), float(v.y), float(v.z)]
+
     def _on_sensors(self, msg) -> None:
+        quat = msg.imu_data.quat  # geometry_msgs/Quaternion: x y z w attributes
         with self._lock:
             self._sensors = {
                 "stamp": msg.header.stamp.to_sec() if msg.header.stamp else msg.sensor_time.to_sec(),
                 "joint_q": [float(v) for v in msg.joint_data.joint_q],
                 "joint_v": [float(v) for v in msg.joint_data.joint_v],
                 "joint_torque": [float(v) for v in msg.joint_data.joint_torque],
-                "imu_quat": [float(v) for v in msg.imu_data.quat],
-                "imu_gyro": [float(v) for v in msg.imu_data.gyroscope],
+                "imu_quat": [float(quat.x), float(quat.y), float(quat.z), float(quat.w)],
+                "imu_gyro": self._vector3(msg.imu_data.gyro),
             }
 
     def _on_odom(self, msg) -> None:

@@ -26,6 +26,10 @@ class RosStub:
         self.published: dict[str, list] = {}
         self.service_calls: list[tuple[str, int]] = []
         self.services = {SERVICE_ARM_CTRL_MODE, SERVICE_MPC_CTRL_MODE}
+        self.init_node_calls: list[tuple[str, dict]] = []
+
+    def init_node(self, name, **kwargs):
+        self.init_node_calls.append((name, kwargs))
 
     class Time:
         @staticmethod
@@ -106,16 +110,44 @@ def make_port(monkeypatch):
     return port, ros
 
 
+def test_port_initializes_the_ros_node_once(monkeypatch):
+    """The demo crash: without init_node the first publish dies mid-step. The port owns
+    the node name so callers never see rospy."""
+    ros = install_stubs(monkeypatch)
+    KuavoPort()
+    assert len(ros.init_node_calls) == 1
+    name, kwargs = ros.init_node_calls[0]
+    assert name == "homebody_kuavo"
+    assert kwargs.get("disable_signals") is True  # safe inside threads / scripts
+    assert kwargs.get("anonymous") is True
+
+
 def feed_sensors(port, joint_q):
-    """Push one sensor frame through the port's real callback, as rospy would."""
+    """Push one sensor frame through the port's real callback, as rospy would. The IMU
+    fields use the wire shape (Quaternion object, gyro Vector3), per kuavo_msgs/imuData."""
     frame = SimpleNamespace(
         header=SimpleNamespace(stamp=None),
         sensor_time=SimpleNamespace(to_sec=lambda: 0.0),
         joint_data=SimpleNamespace(joint_q=list(joint_q), joint_v=[0.0] * 20,
                                    joint_torque=[0.0] * 20),
-        imu_data=SimpleNamespace(quat=[0.0] * 4, gyroscope=[0.0] * 3),
+        imu_data=SimpleNamespace(
+            quat=SimpleNamespace(x=0.0, y=0.0, z=0.0, w=1.0),
+            gyro=SimpleNamespace(x=0.0, y=0.0, z=0.0),
+        ),
     )
     port._on_sensors(frame)
+
+
+def test_sensors_frame_accepts_the_real_imu_message_shape(monkeypatch):
+    """The demo crash: the sim's quat arrives as a Quaternion object, not a list, and
+    the gyro field is 'gyro'. The frame must still come out as plain float lists."""
+    port, _ = make_port(monkeypatch)
+    feed_sensors(port, [0.1] * 20)
+    frame = port.sensors()
+    assert frame is not None
+    assert frame["imu_quat"] == [0.0, 0.0, 0.0, 1.0]
+    assert frame["imu_gyro"] == [0.0, 0.0, 0.0]
+    assert frame["joint_q"] == pytest.approx([0.1] * 20)
 
 
 def test_arm_traj_reaches_the_wire_in_degrees(monkeypatch):

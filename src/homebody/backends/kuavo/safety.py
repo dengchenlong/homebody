@@ -30,6 +30,7 @@ class ArmGate:
         self._weight = 0.0
         self._weight_target = 0.0
         self._ramp_rate = 0.5  # weight per second
+        self._best_gap = float("inf")
         self._last_gap = float("inf")
 
     def prime(self, q_arm) -> None:
@@ -74,9 +75,14 @@ class ArmGate:
         self._q_cmd = np.clip(self._q_cmd, self.lower + LIMIT_MARGIN_RAD,
                               self.upper - LIMIT_MARGIN_RAD)
 
-        # 4. not-following: the commanded pose must keep converging on the measured one
+        # 4. not-following: the measured pose must keep converging on the commanded one.
+        # The judge compares against the best gap seen, with divergence slack: a single
+        # tick at the rate-clamp boundary (or the deadman-sized first step) is not
+        # divergence — the arm has controller-side smoothing and sensor latency.
         gap = float(np.max(np.abs(self._q_cmd - q_meas)))
-        following = gap < self._last_gap + max_delta or gap < 0.15
+        slack = self.watchdog_s * self.max_rate  # half a rate-clamp step of slack
+        following = gap <= self._best_gap + slack or gap < 0.15
+        self._best_gap = min(self._best_gap, gap)
         self._last_gap = gap
 
         return self._q_cmd.copy(), following

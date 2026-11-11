@@ -168,3 +168,69 @@ def test_close_stops_and_closes_port():
     backend.close()
     assert port.closed
     assert port.cmd_vel[-1] == (0.0, 0.0, 0.0)
+
+
+def test_gate_tolerates_a_slow_arm_that_keeps_converging():
+    """The demo failure: the sim arm tracks the 1.05 rad/s command ramp with lag, so the
+    gap grows by (almost exactly) max_delta per tick and the strict `<` flagged a
+    healthy arm as not-following. Convergence counts: only sustained divergence refuses."""
+    import numpy as np
+
+    from homebody.backends.kuavo.safety import ArmGate
+
+    gate = ArmGate(lower=[-1.0] * 7, upper=[1.0] * 7)
+    measured = np.array([0.262, 0.001, 0.0, -0.524, 0.0, 0.0, 0.006])
+    preset = np.array([0.0, 0.3, 0.0, -0.6, 0.0, -0.3, 0.0])
+    gate.prime(measured)
+    gate.arm(ramp_s=2.0)
+    arm = measured.copy()
+    dt = 0.2
+    for _ in range(200):
+        _, following = gate(preset, arm, dt)
+        assert following, f"refused while the arm was converging (weight={gate.weight})"
+        arm = arm + 0.5 * (gate._q_cmd - arm)  # a lagging but honest arm
+        dt = 0.01
+
+
+def test_gate_flags_a_stuck_arm_once_the_gap_diverges():
+    """The inverse: an arm that never moves while commands march away must refuse."""
+    import numpy as np
+
+    from homebody.backends.kuavo.safety import ArmGate
+
+    gate = ArmGate(lower=[-1.0] * 7, upper=[1.0] * 7)
+    measured = np.array([0.262, 0.001, 0.0, -0.524, 0.0, 0.0, 0.006])
+    preset = np.array([0.0, 0.3, 0.0, -0.6, 0.0, -0.3, 0.0])
+    gate.prime(measured)
+    gate.arm(ramp_s=2.0)
+    arm = measured.copy()
+    stuck = None
+    for tick in range(200):
+        _, following = gate(preset, arm, 0.01)
+        if not following:
+            stuck = tick
+            break
+        # dead arm: nothing moves
+    assert stuck is not None, "a motionless arm was never flagged"
+    assert stuck < 100
+
+
+def test_gate_survives_the_deadman_step_boundary():
+    """The demo death: tick0 uses the deadman dt (0.2 s) so the command jumps 0.21 rad;
+    tick1 adds one 0.0105 step. If the sim arm has not measurably moved yet, the gap
+    equals last_gap + max_delta exactly and the strict `<` refused a healthy arm. The
+    judge must compare against the best gap seen, with divergence slack, not a strict
+    per-tick inequality."""
+    import numpy as np
+
+    from homebody.backends.kuavo.safety import ArmGate
+
+    gate = ArmGate(lower=[-1.0] * 7, upper=[1.0] * 7)
+    measured = np.array([0.262, 0.001, 0.0, -0.524, 0.0, 0.0, 0.006])
+    preset = np.array([0.0, 0.3, 0.0, -0.6, 0.0, -0.3, 0.0])
+    gate.prime(measured)
+    gate.arm(ramp_s=2.0)
+    arm = measured.copy()
+    gate(preset, arm, 0.2)  # tick0: the deadman-sized step
+    _, following = gate(preset, arm, 0.01)  # tick1: arm not moved yet
+    assert following, "the step boundary must not kill a converging arm"

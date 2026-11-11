@@ -20,6 +20,7 @@ from .profile import (
     CONTROL_HZ,
     LEFT_ARM_JOINTS,
     RIGHT_ARM_JOINTS,
+    urdf_path,
 )
 
 # A reachable two-sided preset, radians, inside every URDF stop with margin.
@@ -47,7 +48,7 @@ def wait_reach(backend, joint_names, timeout_s: float = 8.0) -> None:
 
 
 def main() -> int:
-    backend = KuavoBackend()
+    backend = KuavoBackend(urdf=urdf_path())
     stopping = False
 
     def halt(signum, frame):
