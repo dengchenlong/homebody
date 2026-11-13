@@ -23,14 +23,16 @@ def key(variable: str) -> str:
 
 class ClaudeApi:
     """Anthropic Messages API; the decision is the forced input of one tool. A relay serving the
-    same API replaces the official endpoint through ANTHROPIC_BASE_URL (scheme and host only)."""
+    same API replaces the official endpoint through ANTHROPIC_BASE_URL, with or without its /v1."""
     URL = "https://api.anthropic.com/v1/messages"
     LABEL, KEY = "Claude", "ANTHROPIC_API_KEY"
 
     @classmethod
     def endpoint(cls) -> str:
         base = os.environ.get("ANTHROPIC_BASE_URL", "").strip().rstrip("/")
-        return f"{base}/messages" if base else cls.URL
+        if not base:
+            return cls.URL
+        return f"{base}/messages" if base.endswith("/v1") else f"{base}/v1/messages"
 
     def __init__(self, settings: Agent):
         self.settings = settings

@@ -109,7 +109,7 @@ def test_claude_api_forces_the_decision_tool_and_attaches_the_images(tmp_path, m
 
 def test_claude_api_takes_a_relay_base_url_from_the_environment(tmp_path, monkeypatch):
     """A relay serving the Anthropic Messages API replaces the official URL; the body, headers
-    and evidence are unchanged."""
+    and evidence are unchanged. A base with its /v1 is taken as the full prefix."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "k-test")
     monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://relay.example/v1")
     calls = fake_transport(monkeypatch, CLAUDE_REPLY)
@@ -117,6 +117,12 @@ def test_claude_api_takes_a_relay_base_url_from_the_environment(tmp_path, monkey
         "p", images=(), names=("done",), attempt=tmp_path / "a", tick=lambda: None, cancelled=lambda: False)
     assert decision.skill == "done"
     assert calls[0][0] == "https://relay.example/v1/messages"
+
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://relay.example")
+    calls = fake_transport(monkeypatch, CLAUDE_REPLY)
+    ClaudeApi(Agent(model="opus-api")).generate(
+        "p", images=(), names=("done",), attempt=tmp_path / "b", tick=lambda: None, cancelled=lambda: False)
+    assert calls[-1][0] == "https://relay.example/v1/messages"
 
 
 def test_openai_api_requests_a_strict_schema_and_parses_the_content(tmp_path, monkeypatch):
