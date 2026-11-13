@@ -87,6 +87,7 @@ def test_claude_api_forces_the_decision_tool_and_attaches_the_images(tmp_path, m
     """The recorded request names each image file instead of holding its bytes a second time,
     and the physics owner keeps ticking while the request runs."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "k-test")
+    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
     calls = fake_transport(monkeypatch, {"content": [{"type": "tool_use", "name": "decide", "input": {
         "text": "The carton is in reach.", "skill": "pick", "arguments_json": '{"hand": "right"}'}}]})
     ticks = []
@@ -104,6 +105,18 @@ def test_claude_api_forces_the_decision_tool_and_attaches_the_images(tmp_path, m
     assert recorded["messages"][0]["content"][0]["source"] == {"file": "observation-0.png"}
     assert json.loads((tmp_path / "attempt/status.json").read_text())["status"] == "ok"
     assert ticks
+
+
+def test_claude_api_takes_a_relay_base_url_from_the_environment(tmp_path, monkeypatch):
+    """A relay serving the Anthropic Messages API replaces the official URL; the body, headers
+    and evidence are unchanged."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k-test")
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://relay.example/v1")
+    calls = fake_transport(monkeypatch, CLAUDE_REPLY)
+    decision = ClaudeApi(Agent(model="opus-api")).generate(
+        "p", images=(), names=("done",), attempt=tmp_path / "a", tick=lambda: None, cancelled=lambda: False)
+    assert decision.skill == "done"
+    assert calls[0][0] == "https://relay.example/v1/messages"
 
 
 def test_openai_api_requests_a_strict_schema_and_parses_the_content(tmp_path, monkeypatch):

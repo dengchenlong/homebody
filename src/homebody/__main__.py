@@ -94,8 +94,8 @@ def provider_check(settings, output):
     provider = make(settings.agent)
     try:
         decision = provider.generate(
-            'Return {"text":"connection checked","skill":"done","arguments_json":"{}"}. '
-            'Do not use tools.', images=(), names=("done",), attempt=path,
+            'Return {"text":"connection checked","skill":"done","arguments_json":"{}"}.',
+            images=(), names=("done",), attempt=path,
             tick=lambda: time.sleep(0.02), cancelled=lambda: False)
         print(f"{settings.agent.provider}: {decision.text}")
         return 0
