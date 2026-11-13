@@ -81,3 +81,20 @@ sessions, never from one run.
 `.githooks/pre-commit` runs ruff and pytest on a commit that touches Python (enable once per
 clone: `git config core.hooksPath .githooks`), and `.github/workflows/checks.yml` runs the same
 two on every push.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live as GitHub issues on the user's fork `dengchenlong/homebody` (never upstream
+`Stanford-TML/homebody`), operated via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default five-role vocabulary; label strings equal the role names
+(needs-triage / needs-info / ready-for-agent / ready-for-human / wontfix).
+See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `GLOSSARY.md` at repo root + `docs/adr/`. See `docs/agents/domain.md`.
