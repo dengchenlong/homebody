@@ -6,6 +6,7 @@ Every import failure names the container instead of a traceback.
 """
 from __future__ import annotations
 
+import os
 import threading
 
 from .joints import to_wire_degrees
@@ -29,6 +30,55 @@ def _raise_ros_missing() -> None:
     )
 
 
+def _patch_rospy_findcaller() -> None:
+    """rosgraph 1.17's RospyLogger.findCaller spins forever on Python >= 3.11: once the
+    walk reaches the top frame, `if f.f_back` never advances and the `hasattr(f, "f_code")`
+    loop never exits, so init_node burns a core inside its first log call. Python 3.8's
+    logging walks a different stack shape and never hits it (the M1 demo ran clean).
+    The patched walk exits when the chain ends, exactly the upstream intent."""
+    import sys
+
+    if (sys.version_info.major, sys.version_info.minor) < (3, 11):
+        return
+    import inspect
+
+    try:
+        import rosgraph.roslogging
+    except ImportError:
+        return
+
+    if getattr(rosgraph.roslogging.RospyLogger.findCaller, "_homebody_patched", False):
+        return
+
+    def findCaller(self, *args, **kwargs):
+        file_name, lineno, func_name = super(rosgraph.roslogging.RospyLogger, self).findCaller(
+            *args, **kwargs)[:3]
+        file_name = os.path.normcase(file_name)
+        frame = inspect.currentframe()
+        if frame is not None:
+            frame = frame.f_back
+        while hasattr(frame, "f_code"):
+            code = frame.f_code
+            if os.path.normcase(code.co_filename) == file_name \
+                    and frame.f_lineno == lineno and code.co_name == func_name:
+                break
+            if frame.f_back is None:
+                break
+            frame = frame.f_back
+        code = frame.f_code if frame is not None else None
+        name = code.co_name if code is not None else func_name
+        try:
+            class_name = frame.f_locals["self"].__class__.__name__
+            name = f"{class_name}.{name}"
+        except (KeyError, TypeError):
+            pass
+        return code.co_filename if code is not None else file_name, \
+            frame.f_lineno if frame is not None else lineno, name, None
+
+    findCaller._homebody_patched = True
+    rosgraph.roslogging.RospyLogger.findCaller = findCaller
+
+
 class KuavoPort:
     """The one ROS1 surface the backend speaks through. Construction attaches to the
     running controller; every call afterwards is plain publish/subscribe."""
@@ -46,6 +96,7 @@ class KuavoPort:
         except ImportError:
             _raise_ros_missing()
             raise  # unreachable; keeps the names defined for type checkers
+        _patch_rospy_findcaller()
         # Every publish/subscribe needs a node; the port owns the name so callers
         # never touch rospy. disable_signals keeps this safe in threaded contexts.
         rospy.init_node("homebody_kuavo", disable_signals=True, anonymous=True)

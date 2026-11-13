@@ -122,6 +122,40 @@ def test_port_initializes_the_ros_node_once(monkeypatch):
     assert kwargs.get("anonymous") is True
 
 
+def test_port_patches_the_rospy_findcaller_spin(monkeypatch):
+    """rosgraph 1.17 spins forever in findCaller on Python >= 3.11 when the walk reaches
+    the top frame (f_back None never advances the loop): init_node burns a core before its
+    first topic. The port patches the walk to stop at the chain's end, once, and only on
+    the affected interpreters; the patched walk returns the top frame like upstream intends."""
+    install_stubs(monkeypatch)
+    import sys
+
+    patched = []
+    monkeypatch.delenv("PYTHONUNBUFFERED", raising=False)
+
+    class FakeRospyLogger:
+        @staticmethod
+        def findCaller():
+            return None  # sentinel the patch replaces
+
+    fake_roslogging = SimpleNamespace(RospyLogger=FakeRospyLogger)
+    fake_rosgraph = SimpleNamespace(roslogging=fake_roslogging)
+    monkeypatch.setitem(__import__("sys").modules, "rosgraph", fake_rosgraph)
+    monkeypatch.setitem(__import__("sys").modules, "rosgraph.roslogging", fake_roslogging)
+
+    affected = (sys.version_info.major, sys.version_info.minor) >= (3, 11)
+    KuavoPort()
+    if affected:
+        assert getattr(FakeRospyLogger.findCaller, "_homebody_patched", False), \
+            "the port must install the findCaller fix before init_node"
+        patched.append(FakeRospyLogger.findCaller)
+    else:
+        assert not getattr(FakeRospyLogger.findCaller, "_homebody_patched", False)
+    # a second construction must not double-patch (idempotent)
+    KuavoPort()
+    assert patched == [] or FakeRospyLogger.findCaller is patched[0]
+
+
 def feed_sensors(port, joint_q):
     """Push one sensor frame through the port's real callback, as rospy would. The IMU
     fields use the wire shape (Quaternion object, gyro Vector3), per kuavo_msgs/imuData."""
