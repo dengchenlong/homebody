@@ -9,13 +9,17 @@ from __future__ import annotations
 import os
 import threading
 
+from . import camera
 from .joints import to_wire_degrees
 from .profile import (
     SERVICE_ARM_CTRL_MODE,
     SERVICE_MPC_CTRL_MODE,
     TOPIC_ARM_REACH,
     TOPIC_ARM_TRAJ,
+    TOPIC_CAMERA_COLOR_INFO,
+    TOPIC_CAMERA_RGB,
     TOPIC_CMD_VEL,
+    TOPIC_DEPTH_ALIGNED,
     TOPIC_ODOM,
     TOPIC_SENSORS,
 )
@@ -90,7 +94,7 @@ class KuavoPort:
             from kuavo_msgs.msg import sensorsData
             from kuavo_msgs.srv import changeArmCtrlMode, changeTorsoCtrlMode
             from nav_msgs.msg import Odometry
-            from sensor_msgs.msg import JointState
+            from sensor_msgs.msg import CameraInfo, Image, JointState
             from std_msgs.msg import Float32
             from std_srvs.srv import Empty, Trigger
         except ImportError:
@@ -108,11 +112,19 @@ class KuavoPort:
         self._lock = threading.Lock()
         self._sensors: dict | None = None
         self._odom: dict | None = None
+        self._camera: dict | None = None
+        self._camera_stamp: float | None = None
         self._reach: dict[str, float] = {}
         self._subs = [
             rospy.Subscriber(TOPIC_SENSORS, sensorsData, self._on_sensors, queue_size=1,
                              tcp_nodelay=True),
             rospy.Subscriber(TOPIC_ODOM, Odometry, self._on_odom, queue_size=1, tcp_nodelay=True),
+            rospy.Subscriber(TOPIC_CAMERA_RGB, Image, self._on_rgb, queue_size=1,
+                             tcp_nodelay=True),
+            rospy.Subscriber(TOPIC_DEPTH_ALIGNED, Image, self._on_depth, queue_size=1,
+                             tcp_nodelay=True),
+            rospy.Subscriber(TOPIC_CAMERA_COLOR_INFO, CameraInfo, self._on_color_info,
+                             queue_size=1),
         ]
         self._pub_cmd_vel = rospy.Publisher(TOPIC_CMD_VEL, Twist, queue_size=1, tcp_nodelay=True)
         self._pub_arm_traj = rospy.Publisher(TOPIC_ARM_TRAJ, JointState, queue_size=1,
@@ -155,11 +167,46 @@ class KuavoPort:
                 self._reach[name] = float(msg.data)
         return callback
 
+    # --- camera callbacks: the RealSense streams, decoded to plain arrays (camera.md).
+    # A frame that fails to decode never replaces the last good one.
+    def _on_rgb(self, msg) -> None:
+        rgb = camera.decode_rgb(msg)
+        if rgb is None:
+            return
+        with self._lock:
+            self._camera = {**(self._camera or {}), "rgb": rgb}
+
+    def _on_depth(self, msg) -> None:
+        depth = camera.decode_depth(msg)
+        if depth is None:
+            return
+        with self._lock:
+            self._camera = {**(self._camera or {}), "depth": depth}
+            self._camera_stamp = self._rospy.Time.now().to_sec()
+
+    def _on_color_info(self, msg) -> None:
+        intrinsics = camera.decode_intrinsics(msg)
+        if intrinsics is None:
+            return
+        with self._lock:
+            self._camera = {**(self._camera or {}), "intrinsics": intrinsics}
+
     # --- reads
     def sensors(self) -> dict | None:
         """The newest sensor frame, or None before the first one arrives."""
         with self._lock:
             return self._sensors
+
+    def camera(self) -> dict | None:
+        """The newest decoded camera frame {rgb, depth, intrinsics}, or None before the
+        first one arrives. One dict per call; a later callback cannot mutate it."""
+        with self._lock:
+            return dict(self._camera) if self._camera is not None else None
+
+    def camera_stamp(self) -> float | None:
+        """When the newest depth frame arrived on the ROS clock, or None."""
+        with self._lock:
+            return self._camera_stamp
 
     def odom(self) -> dict | None:
         """The newest odometry, or None before the first one arrives."""

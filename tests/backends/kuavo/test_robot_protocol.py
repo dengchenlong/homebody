@@ -97,3 +97,56 @@ def test_protocol_reset_and_close():
     backend.close()
     assert port.closed
     backend.stop(backend.epoch)  # after close the base publishes nothing more
+
+
+def test_snapshot_uses_the_camera_when_one_is_wired():
+    """When the port hands back a decoded camera frame, snapshot builds the Frame from
+    it: the rgb and depth arrays pass through, the intrinsics come along, and the
+    depth click geometry works."""
+    backend, port = make_backend()
+    port.camera_value = {
+        "rgb": np.full((4, 6, 3), 7, dtype=np.uint8),
+        "depth": np.where(np.arange(24).reshape(4, 6) % 2 == 0,
+                          (np.arange(24).reshape(4, 6) / 10.0) + 0.5, np.nan),
+        "intrinsics": np.array([[400.0, 0.0, 3.0], [0.0, 400.0, 2.0], [0.0, 0.0, 1.0]]),
+    }
+    frame = backend.snapshot()
+    assert frame.rgb.shape == (4, 6, 3)
+    assert frame.rgb[0, 0, 0] == 7
+    assert frame.depth.shape == (4, 6)
+    assert frame.intrinsics[0, 0] == 400.0
+    world = frame.point(2, 0)  # pixel index 2: even, so its depth is finite
+    assert np.isfinite(world).all()
+
+
+def test_snapshot_falls_back_to_blank_when_the_camera_has_no_frames():
+    """The sim publishes no image topics: camera() is None and the blank frame stays."""
+    backend, _ = make_backend()
+    frame = backend.snapshot()
+    assert not np.isfinite(frame.depth).any()
+    assert frame.intrinsics[0, 0] == 1.0
+
+
+def test_snapshot_keeps_blank_until_both_streams_arrive():
+    """An rgb-only frame is not a usable camera frame: no depth means no click geometry,
+    so the blank fallback holds until depth is in."""
+    backend, port = make_backend()
+    port.camera_value = {
+        "rgb": np.zeros((4, 6, 3), dtype=np.uint8),
+        "intrinsics": np.diag([400.0, 400.0, 1.0]).astype(float),
+    }
+    frame = backend.snapshot()
+    assert not np.isfinite(frame.depth).any()
+
+
+def test_snapshot_camera_depth_with_identity_intrinsics_is_a_real_frame():
+    """The port dict always carries the full triple once depth is in; identity
+    intrinsics are a legitimate calibration, so the frame passes through."""
+    backend, port = make_backend()
+    port.camera_value = {
+        "rgb": np.zeros((4, 6, 3), dtype=np.uint8),
+        "depth": np.full((4, 6), 1.5),
+        "intrinsics": np.eye(3),
+    }
+    frame = backend.snapshot()
+    assert np.isfinite(frame.depth).all()

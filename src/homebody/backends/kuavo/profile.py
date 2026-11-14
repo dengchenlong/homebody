@@ -17,6 +17,11 @@ SERVICE_ARM_CTRL_MODE = "/wheel_arm_change_arm_ctrl_mode"  # 0 fixed / 1 auto-sw
 SERVICE_MPC_CTRL_MODE = "/mobile_manipulator_mpc_control"  # 1 arm-only / 3 base+arm
 SERVICE_ENABLE_CONTROL = "/enable_control"  # std_srvs/Trigger, master enable
 
+# --- head camera (real robot; assets/robot/kuavo_5w/camera.md — the sim publishes none)
+TOPIC_CAMERA_RGB = "/camera/color/image_raw"  # sensor_msgs/Image, rgb8/bgr8
+TOPIC_DEPTH_ALIGNED = "/camera/aligned_depth_to_color/image_raw"  # shares the rgb grid
+TOPIC_CAMERA_COLOR_INFO = "/camera/color/camera_info"  # RealSense factory calibration
+
 ARM_FIXED, ARM_AUTO_SWING, ARM_EXTERNAL = 0, 1, 2
 MPC_NO_CONTROL, MPC_ARM_ONLY, MPC_BASE_ONLY, MPC_BASE_ARM = 0, 1, 2, 3
 
@@ -57,6 +62,7 @@ __all__ = [
     "BASE_MAX_ANGULAR_RPS", "BASE_MAX_LINEAR_MPS", "CONTROL_HZ", "DEADMAN_S",
     "LEFT_ARM_JOINTS", "MPC_ARM_ONLY", "MPC_BASE_ARM", "MPC_BASE_ONLY", "MPC_NO_CONTROL",
     "RIGHT_ARM_JOINTS", "SENSOR_JOINTS", "SERVICE_ARM_CTRL_MODE", "SERVICE_ENABLE_CONTROL",
-    "SERVICE_MPC_CTRL_MODE", "TOPIC_ARM_REACH", "TOPIC_ARM_TRAJ", "TOPIC_CMD_VEL",
-    "TOPIC_ODOM", "TOPIC_SENSORS", "WIRE_JOINT_ORDER", "urdf_path",
+    "SERVICE_MPC_CTRL_MODE", "TOPIC_ARM_REACH", "TOPIC_ARM_TRAJ", "TOPIC_CAMERA_COLOR_INFO",
+    "TOPIC_CAMERA_RGB", "TOPIC_CMD_VEL", "TOPIC_DEPTH_ALIGNED", "TOPIC_ODOM",
+    "TOPIC_SENSORS", "WIRE_JOINT_ORDER", "urdf_path",
 ]

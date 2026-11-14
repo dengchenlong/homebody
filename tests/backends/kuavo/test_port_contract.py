@@ -27,6 +27,7 @@ class RosStub:
         self.service_calls: list[tuple[str, int]] = []
         self.services = {SERVICE_ARM_CTRL_MODE, SERVICE_MPC_CTRL_MODE}
         self.init_node_calls: list[tuple[str, dict]] = []
+        self.subscribers: list[SimpleNamespace] = []
 
     def init_node(self, name, **kwargs):
         self.init_node_calls.append((name, kwargs))
@@ -37,7 +38,9 @@ class RosStub:
             return SimpleNamespace(to_sec=lambda: 0.0)
 
     def Subscriber(self, topic, msg_type, callback, queue_size=1, tcp_nodelay=False):
-        return SimpleNamespace(topic=topic, unregister=lambda: None)
+        record = SimpleNamespace(topic=topic, unregister=lambda: None)
+        self.subscribers.append(record)
+        return record
 
     def Publisher(self, topic, msg_type, queue_size=1, tcp_nodelay=False):
         records = self.published.setdefault(topic, [])
@@ -67,6 +70,12 @@ class MsgStub:
         def __init__(self):
             self.name, self.position = [], []
 
+    class Image:
+        pass
+
+    class CameraInfo:
+        pass
+
     class sensorsData:
         class header:
             stamp = None
@@ -91,7 +100,9 @@ def install_stubs(monkeypatch):
     monkeypatch.setitem(__import__("sys").modules, "nav_msgs.msg",
                         SimpleNamespace(Odometry=object))
     monkeypatch.setitem(__import__("sys").modules, "sensor_msgs.msg",
-                        SimpleNamespace(JointState=MsgStub.JointState))
+                        SimpleNamespace(JointState=MsgStub.JointState,
+                                        Image=MsgStub.Image,
+                                        CameraInfo=MsgStub.CameraInfo))
     monkeypatch.setitem(__import__("sys").modules, "std_msgs.msg",
                         SimpleNamespace(Float32=object))
     monkeypatch.setitem(__import__("sys").modules, "std_srvs.srv",
@@ -243,3 +254,78 @@ def test_ensure_arm_control_is_idempotent_enough(monkeypatch):
     before = len(ros.service_calls)
     backend.ensure_arm_control()
     assert len(ros.service_calls) == before + 2  # re-asserted, not cached away
+
+
+def test_port_subscribes_the_realsense_topics(monkeypatch):
+    """The real robot's camera topics (camera.md): aligned depth-to-RGB so rgb and depth
+    share one grid, plus each stream's camera_info for the intrinsics."""
+    ros = install_stubs(monkeypatch)
+    KuavoPort()
+    subscribed = [sub.topic for sub in ros.subscribers]
+    assert "/camera/color/image_raw" in subscribed
+    assert "/camera/aligned_depth_to_color/image_raw" in subscribed
+    assert "/camera/color/camera_info" in subscribed
+
+
+def test_port_stores_the_newest_camera_frames(monkeypatch):
+    """The callbacks cache the latest frame under the port lock, like sensors/odom."""
+    port, _ = make_port(monkeypatch)
+    rgb = rgb_wire(2, 3, "rgb8")
+    port._on_rgb(rgb)
+    port._on_depth(depth_wire(2, 3, "16UC1"))
+    port._on_color_info(InfoWire([500.0, 0.0, 320.0, 0.0, 500.0, 240.0, 0.0, 0.0, 1.0]))
+    assert port.camera()["rgb"].shape == (2, 3, 3)
+    assert port.camera()["depth"].shape == (2, 3)
+    assert port.camera()["intrinsics"][0, 0] == 500.0
+    assert port.camera_stamp() is not None
+
+
+def test_port_camera_is_none_before_any_frame(monkeypatch):
+    port, _ = make_port(monkeypatch)
+    assert port.camera() is None
+    assert port.camera_stamp() is None
+
+
+def test_port_camera_returns_one_locked_snapshot(monkeypatch):
+    """camera() hands back one dict captured under the lock, not a view the next
+    callback can mutate."""
+    port, _ = make_port(monkeypatch)
+    port._on_rgb(rgb_wire(2, 3, "rgb8"))
+    port._on_depth(depth_wire(2, 3, "16UC1"))
+    first = port.camera()
+    port._on_rgb(rgb_wire(4, 5, "rgb8"))
+    assert first["rgb"].shape == (2, 3, 3)
+
+
+def test_port_camera_drops_frames_that_fail_to_decode(monkeypatch):
+    """An unknown encoding must not replace the last good frame with garbage."""
+    port, _ = make_port(monkeypatch)
+    port._on_rgb(rgb_wire(2, 3, "rgb8"))
+    port._on_depth(depth_wire(2, 3, "16UC1"))
+    port._on_rgb(rgb_wire(2, 3, "yuv422"))
+    port._on_depth(depth_wire(2, 3, "8UC1", element=("uint8", 1)))
+    camera = port.camera()
+    assert camera["rgb"].shape == (2, 3, 3)
+    assert camera["depth"].shape == (2, 3)
+
+
+# --- wire helpers: the message shapes rospy hands the callbacks
+def rgb_wire(height, width, encoding, step=None):
+    from types import SimpleNamespace
+    channels = 3
+    stride = step if step is not None else width * channels
+    return SimpleNamespace(height=height, width=width, encoding=encoding, step=stride,
+                           data=list(range(height * stride)))
+
+
+def depth_wire(height, width, encoding, step=None, element=("uint16", 2)):
+    from types import SimpleNamespace
+    itemsize = element[1]
+    stride = step if step is not None else width * itemsize
+    return SimpleNamespace(height=height, width=width, encoding=encoding, step=stride,
+                           data=[1] * (height * stride))
+
+
+class InfoWire:
+    def __init__(self, k):
+        self.k = k

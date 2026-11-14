@@ -142,21 +142,40 @@ class KuavoBackend:
         _time.sleep(result)
 
     def snapshot(self) -> Frame:
-        """One synchronized frame. No camera is wired yet, so the images hold nothing:
-        black rgb, no metric depth, no labels — navigation still routes, and any skill
-        that needs a click is refused at its own argument check."""
+        """One synchronized frame. When the port has a decoded camera frame — real rgb,
+        depth and intrinsics, the aligned-depth-to-rgb pair camera.md pins — the images
+        pass through; otherwise the images hold nothing (black rgb, no metric depth, no
+        labels): navigation still routes, and any skill that needs a click is refused at
+        its own argument check."""
         sensors = self._port.sensors()
         if sensors is None:
             raise ActionRejected("No sensor frame yet")
         joints = np.asarray(sensors["joint_q"], dtype=float)
         blank = np.full((8, 8), np.nan, dtype=float)
+        camera_frame = self._camera_frame()
+        if camera_frame is not None:
+            rgb, depth, intrinsics = camera_frame
+        else:
+            rgb = np.zeros((*blank.shape, 3), dtype=np.uint8)
+            depth, intrinsics = blank, _BLANK_INTRINSICS
         return Frame(self.epoch, self._sequence, self.time,
-                     np.zeros((*blank.shape, 3), dtype=np.uint8), blank, _BLANK_INTRINSICS,
+                     rgb, depth, intrinsics,
                      transform(self._camera_position()),
                      transform([0.0, 0.0, 0.0]),
                      self._base_pose(), joints,
                      {side: _blank_hand() for side in ("left", "right")},
-                     np.zeros(blank.shape, dtype=np.int32), _BLANK_MAP, layout=self.layout)
+                     np.zeros(depth.shape, dtype=np.int32), _BLANK_MAP, layout=self.layout)
+
+    def _camera_frame(self):
+        """The port's camera dict as (rgb, depth, intrinsics), or None until the real
+        triple is complete — a frame without depth has no click geometry."""
+        camera = self._port.camera()
+        if camera is None:
+            return None
+        rgb, depth, intrinsics = camera.get("rgb"), camera.get("depth"), camera.get("intrinsics")
+        if rgb is None or depth is None or intrinsics is None:
+            return None
+        return rgb, depth, intrinsics
 
     def measure(self) -> Measurement:
         sensors = self._port.sensors()

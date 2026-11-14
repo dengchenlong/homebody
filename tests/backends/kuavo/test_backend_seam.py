@@ -21,9 +21,13 @@ class FakePort:
         self.clock_value = 100.0
         self.closed = False
         self.odom_value = None
+        self.camera_value = None
 
     def sensors(self):
         return {"joint_q": self.joint_q, "joint_v": [0.0] * 20}
+
+    def camera(self):
+        return self.camera_value
 
     def odom(self):
         return self.odom_value
