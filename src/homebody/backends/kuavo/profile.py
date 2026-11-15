@@ -53,8 +53,8 @@ WIRE_JOINT_ORDER: dict[str, tuple[str, ...]] = {
 
 
 def urdf_path() -> Path:
-    """The biped_s62 URDF the limits module parses; overridable through the mount point."""
-    return Path("/home/dev_dcl/kuavo_ws/src/kuavo_assets/models/biped_s62/urdf/biped_s62.urdf")
+    """The vendored biped_s62 URDF, the one place the limits and kinematics read."""
+    return Path(__file__).resolve().parents[4] / "assets/robot/kuavo_5w/biped_s62.urdf"
 
 
 __all__ = [

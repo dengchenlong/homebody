@@ -5472,6 +5472,12 @@
    "source": "Kuavo 5W head-camera topic fact-check notes for wiring snapshot()"
   },
   {
+   "path": "assets/robot/kuavo_5w/biped_s62.urdf",
+   "sha256": "76446efbabc4ff1ef24f924430ebd546928662c3b759a6259aa760dce1205153",
+   "bytes": 32338,
+   "source": "Leju Kuavo 5W vendor URDF (biped_s62), copied from kuavo_ws/src/kuavo_assets/models/biped_s62/urdf/biped_s62.urdf on 2026-11-15"
+  },
+  {
    "path": "vendor/holosoma_inference/LICENSE",
    "sha256": "08ec859c8be03e3d0f64ae6df3d67f7fd990051e0b1f6ac3240915bd1de6ee03",
    "bytes": 11348,

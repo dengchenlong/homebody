@@ -25,20 +25,30 @@ def camera_mount(urdf: Path):
 
 
 class Arm:
-    def __init__(self, urdf: Path, side: str):
+    def __init__(self, urdf: Path, side: str, palm_link: str | None = None,
+                 root_link: str | None = None, meshes: Path | None = None):
         if side not in ("left", "right"):
             raise ValueError("Hand must be left or right")
         root = ET.parse(urdf).getroot()
+        # The chain's ends default to the G1 hand: the palm link up to the torso. Another
+        # robot passes its own end-effector link and the link the arm hangs from.
+        palm_link = side + "_hand_palm_link" if palm_link is None else palm_link
+        root_link = "torso_link" if root_link is None else root_link
+        g1_defaults = palm_link == side + "_hand_palm_link" and root_link == "torso_link"
+        if meshes is None:
+            meshes = urdf.parent / "g1_grasp" / "meshes" if g1_defaults else None
         by_child = {j.find("child").get("link"): j for j in root.findall("joint")}
-        link = side + "_hand_palm_link"
+        if palm_link not in by_child:
+            raise ValueError(f"URDF at {urdf} has no joint whose child is {palm_link}")
+        link = palm_link
         chain = []
-        while link != "torso_link":
+        while link != root_link:
             joint = by_child[link]
             chain.append(joint)
             link = joint.find("parent").get("link")
         self.chain = list(reversed(chain))
-        self.collision = CollisionGeometry(urdf.parent / "g1_grasp" / "meshes", side, root,
-                                           [j.find("child").get("link") for j in self.chain])
+        self.collision = None if meshes is None else CollisionGeometry(meshes, side, root,
+                                                                       [j.find("child").get("link") for j in self.chain])
         self.origins = [joint_origin(j) for j in self.chain]
         self.moving = [j for j in self.chain if j.get("type") != "fixed"]
         self.names = tuple(j.get("name") for j in self.moving)
