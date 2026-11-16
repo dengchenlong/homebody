@@ -5461,8 +5461,8 @@
   },
   {
    "path": "assets/robot/kuavo_5w/calibration.json",
-   "sha256": "96e242456078847381b9bf3dad93d560168471af9f6a4043d1e8847e0d7e445b",
-   "bytes": 1031,
+   "sha256": "dfb90a97606487643278ea9c89b4d671b97d2794933765e7ed459892e1052df9",
+   "bytes": 1184,
    "source": "Leju Kuavo 5W (biped_s62) arm joint limits, parsed from the vendor URDF"
   },
   {
@@ -5476,6 +5476,90 @@
    "sha256": "76446efbabc4ff1ef24f924430ebd546928662c3b759a6259aa760dce1205153",
    "bytes": 32338,
    "source": "Leju Kuavo 5W vendor URDF (biped_s62), copied from kuavo_ws/src/kuavo_assets/models/biped_s62/urdf/biped_s62.urdf on 2026-11-15"
+  },
+  {
+   "path": "assets/robot/kuavo_5w/biped_s62/meshes/zarm_r7_link.STL",
+   "sha256": "f43b66ede8547bbe2ed11c9bd8ca2b096ee47547c080ecdf367f705e32263a9f",
+   "bytes": 500034,
+   "source": "Leju Kuavo 5W (biped_s62) arm-link STLs, copied from kuavo_ws/src/kuavo_assets/models/biped_s62/meshes on 2026-11-16; renamed to the URDF link names with the visual origin translation baked into the vertices"
+  },
+  {
+   "path": "assets/robot/kuavo_5w/biped_s62/meshes/zarm_r6_link.STL",
+   "sha256": "040921bdf7c6ad061dcb93e913658c6b01d1a47fad7ecd185fd05f181519f091",
+   "bytes": 1000084,
+   "source": "Leju Kuavo 5W (biped_s62) arm-link STLs, copied from kuavo_ws/src/kuavo_assets/models/biped_s62/meshes on 2026-11-16; renamed to the URDF link names with the visual origin translation baked into the vertices"
+  },
+  {
+   "path": "assets/robot/kuavo_5w/biped_s62/meshes/zarm_r5_link.STL",
+   "sha256": "4d15fdca1324e5d5c47505e8b27927783059efcea96f755ef8e7c550b13b6e71",
+   "bytes": 1000084,
+   "source": "Leju Kuavo 5W (biped_s62) arm-link STLs, copied from kuavo_ws/src/kuavo_assets/models/biped_s62/meshes on 2026-11-16; renamed to the URDF link names with the visual origin translation baked into the vertices"
+  },
+  {
+   "path": "assets/robot/kuavo_5w/biped_s62/meshes/zarm_r4_link.STL",
+   "sha256": "390d75e704a620942f17e9ab9cacbfed815864e1f872a7e3a8fd50beeed075ac",
+   "bytes": 1000034,
+   "source": "Leju Kuavo 5W (biped_s62) arm-link STLs, copied from kuavo_ws/src/kuavo_assets/models/biped_s62/meshes on 2026-11-16; renamed to the URDF link names with the visual origin translation baked into the vertices"
+  },
+  {
+   "path": "assets/robot/kuavo_5w/biped_s62/meshes/zarm_r3_link.STL",
+   "sha256": "1f08e6f17232654288e7bf2a0436260da8dced805ec2408cc86452a1fded3af1",
+   "bytes": 1000034,
+   "source": "Leju Kuavo 5W (biped_s62) arm-link STLs, copied from kuavo_ws/src/kuavo_assets/models/biped_s62/meshes on 2026-11-16; renamed to the URDF link names with the visual origin translation baked into the vertices"
+  },
+  {
+   "path": "assets/robot/kuavo_5w/biped_s62/meshes/zarm_r2_link.STL",
+   "sha256": "f24ac963fb30390967ba3b4365525f775765afdba571c7bcfdf3c1d55a531c70",
+   "bytes": 1842484,
+   "source": "Leju Kuavo 5W (biped_s62) arm-link STLs, copied from kuavo_ws/src/kuavo_assets/models/biped_s62/meshes on 2026-11-16; renamed to the URDF link names with the visual origin translation baked into the vertices"
+  },
+  {
+   "path": "assets/robot/kuavo_5w/biped_s62/meshes/zarm_r1_link.STL",
+   "sha256": "d4956c8caf8300d4002671a74b02c4f73301d8ca14e6db170e79fe35faa83f60",
+   "bytes": 1000084,
+   "source": "Leju Kuavo 5W (biped_s62) arm-link STLs, copied from kuavo_ws/src/kuavo_assets/models/biped_s62/meshes on 2026-11-16; renamed to the URDF link names with the visual origin translation baked into the vertices"
+  },
+  {
+   "path": "assets/robot/kuavo_5w/biped_s62/meshes/zarm_l7_link.STL",
+   "sha256": "fe1305e280fa9e201910855f07360133abc48aab5cd2489dd20bb59b528e7f9e",
+   "bytes": 500084,
+   "source": "Leju Kuavo 5W (biped_s62) arm-link STLs, copied from kuavo_ws/src/kuavo_assets/models/biped_s62/meshes on 2026-11-16; renamed to the URDF link names with the visual origin translation baked into the vertices"
+  },
+  {
+   "path": "assets/robot/kuavo_5w/biped_s62/meshes/zarm_l6_link.STL",
+   "sha256": "62185816e50ec92a1a41fc20c12608a5497932884c59e7b31a5e44555f9c41e6",
+   "bytes": 1000084,
+   "source": "Leju Kuavo 5W (biped_s62) arm-link STLs, copied from kuavo_ws/src/kuavo_assets/models/biped_s62/meshes on 2026-11-16; renamed to the URDF link names with the visual origin translation baked into the vertices"
+  },
+  {
+   "path": "assets/robot/kuavo_5w/biped_s62/meshes/zarm_l5_link.STL",
+   "sha256": "88a1e541d7e74152652fc7f7b41bf832452e323f80d027f4328fd165be693c99",
+   "bytes": 1000084,
+   "source": "Leju Kuavo 5W (biped_s62) arm-link STLs, copied from kuavo_ws/src/kuavo_assets/models/biped_s62/meshes on 2026-11-16; renamed to the URDF link names with the visual origin translation baked into the vertices"
+  },
+  {
+   "path": "assets/robot/kuavo_5w/biped_s62/meshes/zarm_l4_link.STL",
+   "sha256": "6cec372f29bc213ace0526cdf80c7fc35855ad786b5f7a834e776b0a0c90ab3d",
+   "bytes": 1000034,
+   "source": "Leju Kuavo 5W (biped_s62) arm-link STLs, copied from kuavo_ws/src/kuavo_assets/models/biped_s62/meshes on 2026-11-16; renamed to the URDF link names with the visual origin translation baked into the vertices"
+  },
+  {
+   "path": "assets/robot/kuavo_5w/biped_s62/meshes/zarm_l3_link.STL",
+   "sha256": "32d0fe600bc848632d6137a550910ec0e18b649fb320effb5a1d962ddb80e1d2",
+   "bytes": 1000084,
+   "source": "Leju Kuavo 5W (biped_s62) arm-link STLs, copied from kuavo_ws/src/kuavo_assets/models/biped_s62/meshes on 2026-11-16; renamed to the URDF link names with the visual origin translation baked into the vertices"
+  },
+  {
+   "path": "assets/robot/kuavo_5w/biped_s62/meshes/zarm_l2_link.STL",
+   "sha256": "d29ff1d8dbd35823d25da02dfb135fcde3e023e49743d0fc31f82a27afcc0697",
+   "bytes": 1839284,
+   "source": "Leju Kuavo 5W (biped_s62) arm-link STLs, copied from kuavo_ws/src/kuavo_assets/models/biped_s62/meshes on 2026-11-16; renamed to the URDF link names with the visual origin translation baked into the vertices"
+  },
+  {
+   "path": "assets/robot/kuavo_5w/biped_s62/meshes/zarm_l1_link.STL",
+   "sha256": "769c06d9466bbb40f666f1487d8bababe89eb1cede086c0cbe921b177653aba8",
+   "bytes": 1000034,
+   "source": "Leju Kuavo 5W (biped_s62) arm-link STLs, copied from kuavo_ws/src/kuavo_assets/models/biped_s62/meshes on 2026-11-16; renamed to the URDF link names with the visual origin translation baked into the vertices"
   },
   {
    "path": "vendor/holosoma_inference/LICENSE",

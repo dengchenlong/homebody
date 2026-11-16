@@ -37,8 +37,12 @@ class CollisionGeometry:
             axis = np.fromstring(joint.find("axis").get("xyz"), sep=" ")
             self.finger_cross[joint.get("name")] = skew(axis / np.linalg.norm(axis))
         finger_links = [joint.find("child").get("link") for joint in self.finger_joints]
+        # A chain link without a mesh (an end-effector dummy) is skipped, not fatal.
         for name in (*self.links, *finger_links):
-            mesh = trimesh.load_mesh(mesh_directory / (name + ".STL"), process=False)
+            path = mesh_directory / (name + ".STL")
+            if not path.is_file():
+                continue
+            mesh = trimesh.load_mesh(path, process=False)
             low, high = mesh.bounds
             self.bounds[name] = ((low + high) / 2, (high - low) / 2)
             shape = None if name.endswith(PRIMITIVE_LINKS) else convex_shape(mesh.vertices - (low + high) / 2)

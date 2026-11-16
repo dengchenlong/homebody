@@ -57,6 +57,12 @@ def urdf_path() -> Path:
     return Path(__file__).resolve().parents[4] / "assets/robot/kuavo_5w/biped_s62.urdf"
 
 
+def mesh_directory() -> Path:
+    """The vendored arm-link STLs, renamed to the URDF link names with the visual origins
+    baked into the vertices (see assets/robot/kuavo_5w/biped_s62/meshes)."""
+    return Path(__file__).resolve().parents[4] / "assets/robot/kuavo_5w/biped_s62/meshes"
+
+
 __all__ = [
     "ARM_AUTO_SWING", "ARM_EXTERNAL", "ARM_FIXED", "ARM_JOINTS", "ARM_SLICE",
     "BASE_MAX_ANGULAR_RPS", "BASE_MAX_LINEAR_MPS", "CONTROL_HZ", "DEADMAN_S",
@@ -64,5 +70,5 @@ __all__ = [
     "RIGHT_ARM_JOINTS", "SENSOR_JOINTS", "SERVICE_ARM_CTRL_MODE", "SERVICE_ENABLE_CONTROL",
     "SERVICE_MPC_CTRL_MODE", "TOPIC_ARM_REACH", "TOPIC_ARM_TRAJ", "TOPIC_CAMERA_COLOR_INFO",
     "TOPIC_CAMERA_RGB", "TOPIC_CMD_VEL", "TOPIC_DEPTH_ALIGNED", "TOPIC_ODOM",
-    "TOPIC_SENSORS", "WIRE_JOINT_ORDER", "urdf_path",
+    "TOPIC_SENSORS", "WIRE_JOINT_ORDER", "mesh_directory", "urdf_path",
 ]

@@ -123,6 +123,14 @@ def build_backend(args, settings):
 def robot_skills_assets(args, settings):
     """The per-robot Arm kinematics and jaw samples skills plan with; empty for a robot
     whose arm chain or gripper calibration is not part of this release yet."""
+    if args.robot == "kuavo":
+        from homebody.backends.kuavo.profile import mesh_directory, urdf_path
+        from homebody.helpers.kinematics import Arm
+
+        urdf, meshes = urdf_path(), mesh_directory()
+        return ({side: Arm(urdf, side, palm_link=f"zarm_{side[0]}7_end_effector",
+                           root_link="waist_yaw_link", meshes=meshes)
+                 for side in ("left", "right")}, {})
     if args.robot != "g1":
         return {}, {}
     from homebody.helpers.kinematics import Arm

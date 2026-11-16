@@ -1,6 +1,10 @@
 {
  "robot": "kuavo_5w",
- "provenance": "Arm joint limits of the Leju Kuavo 5W (biped_s62), parsed from the vendor URDF kuavo_ws/src/kuavo_assets/models/biped_s62/urdf/biped_s62.urdf on 2026-11-12; radians, homebody's zarm order.",
+ "provenance": "Arm joint limits of the Leju Kuavo 5W (biped_s62), parsed from the vendor URDF kuavo_ws/src/kuavo_assets/models/biped_s62/urdf/biped_s62.urdf on 2026-11-12; radians, homebody's zarm order. hand_joints is empty: the v1 has no gripper channel (Q3), so CollisionGeometry builds no finger boxes.",
+ "hand_joints": {
+  "left": [],
+  "right": []
+ },
  "arm_limits": {
   "left": [
    [
