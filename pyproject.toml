@@ -44,3 +44,4 @@ pythonpath = [".", "src", "vendor"]
 
 [tool.ruff]
 line-length = 100
+extend-exclude = ["*.sh"]
