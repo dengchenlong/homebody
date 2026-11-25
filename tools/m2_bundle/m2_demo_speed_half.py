@@ -55,7 +55,6 @@ def main() -> int:
         left = np.round(sensors["joint_q"][4:11], 3).tolist()
         right = np.round(sensors["joint_q"][11:18], 3).tolist()
         print(f"20 joints ok; left arm = {left}\n             right arm = {right}")
-
         banner("② BASE_ARM + external control")
         backend._port.watch_reach(tuple(f"zarm_{s}{i}_joint" for s in ("l", "r") for i in range(1, 8)))
         backend.ensure_arm_control()
@@ -73,7 +72,9 @@ def main() -> int:
                 time.sleep(1.0 / ARM_STEP_HZ)
             if stopping:
                 break
-            time.sleep(3.0)  # reach-time fallback settle; watch the arm finish visually
+            # the controller's own plan duration when it reports one, else a fixed settle
+            settle = backend._port.arm_settle_time()
+            time.sleep(settle if settle and settle > 0.0 else 3.0)
             now = backend._measured_arm(side)
             print(f"{side} now = {np.round(now, 3).tolist()}")
         if stopping:

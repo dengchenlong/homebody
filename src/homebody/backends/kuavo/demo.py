@@ -34,14 +34,15 @@ def banner(step: str) -> None:
     print(f"\n=== {step} ===", flush=True)
 
 
-def wait_reach(backend, joint_names, timeout_s: float = 8.0) -> None:
-    """Sleep the Ruckig plan's longest reach time, once the port reports it."""
+def wait_reach(backend, timeout_s: float = 8.0) -> None:
+    """Sleep the arm plan's duration once the controller reports it. The wire carries one
+    reach time per arm, so the port answers with the longest armed side's plan."""
     port = backend._port
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
-        times = [port.arm_reach_time(name) for name in joint_names]
-        if all(t is not None and t > 0.0 for t in times):
-            time.sleep(max(times))
+        settle = port.arm_settle_time()
+        if settle is not None and settle > 0.0:
+            time.sleep(settle)
             return
         time.sleep(0.05)
     time.sleep(3.0)  # reach topics missing: fall back to a fixed settle
@@ -85,7 +86,7 @@ def main() -> int:
             backend.arm_target(epoch, "left", PRESET_LEFT)
             backend.arm_target(epoch, "right", PRESET_RIGHT)
             time.sleep(1.0 / CONTROL_HZ)
-        wait_reach(backend, LEFT_ARM_JOINTS + RIGHT_ARM_JOINTS)
+        wait_reach(backend)
         arms = from_sensor_radians(backend._port.sensors()["joint_q"])
         print(f"left now = {np.round(arms['left'], 3).tolist()}")
         print(f"right now = {np.round(arms['right'], 3).tolist()}")

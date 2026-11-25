@@ -38,7 +38,7 @@ class RosStub:
             return SimpleNamespace(to_sec=lambda: 0.0)
 
     def Subscriber(self, topic, msg_type, callback, queue_size=1, tcp_nodelay=False):
-        record = SimpleNamespace(topic=topic, unregister=lambda: None)
+        record = SimpleNamespace(topic=topic, callback=callback, unregister=lambda: None)
         self.subscribers.append(record)
         return record
 
@@ -254,6 +254,38 @@ def test_ensure_arm_control_is_idempotent_enough(monkeypatch):
     before = len(ros.service_calls)
     backend.ensure_arm_control()
     assert len(ros.service_calls) == before + 2  # re-asserted, not cached away
+
+
+def test_reach_time_is_subscribed_per_side(monkeypatch):
+    """The controller publishes the Ruckig plan's duration per ARM, not per joint:
+    `/lb_arm_joint_reach_time/left` and `/right` each carry one Float32 for that arm's
+    whole 7-joint plan (kuavo_ws MobileManipulatorReferenceManager.cpp advertises exactly
+    those two, and the live sim lists them). Subscribing `/<joint name>` never receives."""
+    port, ros = make_port(monkeypatch)
+    port.watch_reach(("zarm_l1_joint", "zarm_r1_joint"))
+    topics = sorted(sub.topic for sub in ros.subscribers if "reach_time" in sub.topic)
+    assert topics == ["/lb_arm_joint_reach_time/left", "/lb_arm_joint_reach_time/right"]
+
+
+def test_reach_time_lands_on_every_joint_of_that_side(monkeypatch):
+    """One Float32 per arm: every joint of a side reports that arm's plan duration."""
+    port, ros = make_port(monkeypatch)
+    port.watch_reach(("zarm_l1_joint", "zarm_l7_joint", "zarm_r3_joint"))
+    left = next(s for s in ros.subscribers if s.topic == "/lb_arm_joint_reach_time/left")
+    left.callback(SimpleNamespace(data=1.75))
+    assert port.arm_reach_time("zarm_l1_joint") == pytest.approx(1.75)
+    assert port.arm_reach_time("zarm_l7_joint") == pytest.approx(1.75)
+    assert port.arm_reach_time("zarm_r3_joint") is None  # the right arm's plan hasn't arrived
+
+
+def test_watch_reach_returns_the_arm_settle_time(monkeypatch):
+    """A caller arms both sides and asks how long to wait: the longest live plan."""
+    port, ros = make_port(monkeypatch)
+    port.watch_reach(("zarm_l1_joint", "zarm_r1_joint"))
+    for sub in ros.subscribers:
+        if "reach_time" in sub.topic:
+            sub.callback(SimpleNamespace(data=0.6 if sub.topic.endswith("/left") else 2.5))
+    assert port.arm_settle_time() == pytest.approx(2.5)
 
 
 def test_port_subscribes_the_realsense_topics(monkeypatch):

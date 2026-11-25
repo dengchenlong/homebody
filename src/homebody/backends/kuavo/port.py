@@ -115,6 +115,7 @@ class KuavoPort:
         self._camera: dict | None = None
         self._camera_stamp: float | None = None
         self._reach: dict[str, float] = {}
+        self._reach_sides: set[str] = set()
         self._subs = [
             rospy.Subscriber(TOPIC_SENSORS, sensorsData, self._on_sensors, queue_size=1,
                              tcp_nodelay=True),
@@ -161,10 +162,10 @@ class KuavoPort:
                             msg.twist.twist.angular.z],
             }
 
-    def _on_reach(self, name):
+    def _on_reach(self, side):
         def callback(msg) -> None:
             with self._lock:
-                self._reach[name] = float(msg.data)
+                self._reach[side] = float(msg.data)
         return callback
 
     # --- camera callbacks: the RealSense streams, decoded to plain arrays (camera.md).
@@ -214,14 +215,34 @@ class KuavoPort:
             return self._odom
 
     def arm_reach_time(self, joint_name: str) -> float | None:
-        """The Ruckig plan's duration for one arm joint, or None when unknown."""
-        return self._reach.get(joint_name)
+        """That arm's Ruckig plan duration, or None when nothing has arrived yet. The wire
+        carries one duration per arm, so this answers for every joint of the side."""
+        side = "left" if "_l" in joint_name else "right" if "_r" in joint_name else None
+        if side is None:
+            return None
+        with self._lock:
+            return self._reach.get(side)
+
+    def arm_settle_time(self) -> float | None:
+        """The longest plan duration heard so far across the armed sides, or None when no
+        side has reported. A caller waits this long for the arms to finish."""
+        with self._lock:
+            times = [self._reach[side] for side in self._reach_sides if side in self._reach]
+        return max(times) if times else None
 
     def watch_reach(self, joint_names: tuple[str, ...]) -> None:
-        """Subscribe to the reach-time topic for each named arm joint."""
-        for name in joint_names:
-            self._rospy.Subscriber(f"{TOPIC_ARM_REACH}{name}", self._Float32,
-                                   self._on_reach(name), queue_size=1)
+        """Subscribe once per arm side named in JOINT_NAMES. The controller publishes
+        `/lb_arm_joint_reach_time/left|right` — one Float32 per arm's whole 7-joint plan
+        (kuavo_ws MobileManipulatorReferenceManager.cpp), not one topic per joint."""
+        for side, marker in (("left", "zarm_l"), ("right", "zarm_r")):
+            if not any(name.startswith(marker) for name in joint_names):
+                continue
+            if side in self._reach_sides:
+                continue
+            self._reach_sides.add(side)
+            self._subs.append(
+                self._rospy.Subscriber(f"{TOPIC_ARM_REACH}{side}", self._Float32,
+                                       self._on_reach(side), queue_size=1))
 
     def clock(self) -> float:
         return self._rospy.Time.now().to_sec()
