@@ -14,6 +14,7 @@ from homebody.backends.kuavo.backend import KuavoBackend
 from homebody.backends.kuavo.port import KuavoPort
 from homebody.backends.kuavo.profile import (
     SERVICE_ARM_CTRL_MODE,
+    SERVICE_ENABLE_CONTROL,
     SERVICE_MPC_CTRL_MODE,
     urdf_path,
 )
@@ -24,8 +25,8 @@ class RosStub:
 
     def __init__(self):
         self.published: dict[str, list] = {}
-        self.service_calls: list[tuple[str, int]] = []
-        self.services = {SERVICE_ARM_CTRL_MODE, SERVICE_MPC_CTRL_MODE}
+        self.service_calls: list[tuple[str, type, object]] = []
+        self.services = {SERVICE_ARM_CTRL_MODE, SERVICE_MPC_CTRL_MODE, SERVICE_ENABLE_CONTROL}
         self.init_node_calls: list[tuple[str, dict]] = []
         self.subscribers: list[SimpleNamespace] = []
 
@@ -53,7 +54,7 @@ class RosStub:
 
     def ServiceProxy(self, name, srv_type):
         def proxy(request):
-            self.service_calls.append((name, request.control_mode))
+            self.service_calls.append((name, srv_type, request))
             return SimpleNamespace(result=True, success=True)
         return proxy
 
@@ -91,6 +92,27 @@ class MsgStub:
         def _request_class():
             return SimpleNamespace(control_mode=0)
 
+    class SetBool:
+        """std_srvs/SetBool: one bool field. genpy classes carry __slots__, so assigning
+        a field the message does not have raises, exactly as it would on the wire."""
+        class Request:
+            __slots__ = ("data",)
+
+            def __init__(self):
+                self.data = False
+
+        @staticmethod
+        def _request_class():
+            return MsgStub.SetBool.Request()
+
+    class Trigger:
+        class Request:
+            __slots__ = ()
+
+        @staticmethod
+        def _request_class():
+            return MsgStub.Trigger.Request()
+
 
 def install_stubs(monkeypatch):
     ros = RosStub()
@@ -106,7 +128,8 @@ def install_stubs(monkeypatch):
     monkeypatch.setitem(__import__("sys").modules, "std_msgs.msg",
                         SimpleNamespace(Float32=object))
     monkeypatch.setitem(__import__("sys").modules, "std_srvs.srv",
-                        SimpleNamespace(Empty=object, Trigger=object))
+                        SimpleNamespace(Empty=object, SetBool=MsgStub.SetBool,
+                                        Trigger=MsgStub.Trigger))
     monkeypatch.setitem(__import__("sys").modules, "kuavo_msgs.msg",
                         SimpleNamespace(sensorsData=MsgStub.sensorsData))
     monkeypatch.setitem(__import__("sys").modules, "kuavo_msgs.srv",
@@ -229,7 +252,7 @@ def test_mode_services_precede_the_first_arm_command(monkeypatch):
     feed_sensors(port, [0.0] * 20)
     backend.arm_target(1, "left", [0.0] * 7)
     backend.ensure_arm_control()
-    modes = {name: mode for name, mode in ros.service_calls}
+    modes = {name: request.control_mode for name, _, request in ros.service_calls}
     assert modes[SERVICE_MPC_CTRL_MODE] == 3  # BASE_ARM, or the arm silently won't move
     assert modes[SERVICE_ARM_CTRL_MODE] == 2  # external control
     # the first external-control switch must come before the first arm publish would
@@ -244,6 +267,19 @@ def test_arm_ctrl_mode_refusal_raises(monkeypatch):
     backend.new_epoch()
     with pytest.raises(RuntimeError, match="service"):
         backend.ensure_arm_control()
+
+
+def test_enable_control_speaks_setbool_true(monkeypatch):
+    """The controller advertises /enable_control as std_srvs/SetBool, not Trigger
+    (kuavo_ws humanoidControllerWheelWbc::enableControlCallback takes SetBool and reads
+    req.data: true resumes control, false soft-pauses). A Trigger proxy would mismatch
+    the server's type, and a Trigger request has no field to carry the enable."""
+    port, ros = make_port(monkeypatch)
+    assert port.enable_control() is True
+    name, srv_type, request = ros.service_calls[-1]
+    assert name == SERVICE_ENABLE_CONTROL
+    assert srv_type is MsgStub.SetBool
+    assert request.data is True
 
 
 def test_ensure_arm_control_is_idempotent_enough(monkeypatch):

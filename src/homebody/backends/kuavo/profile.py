@@ -15,7 +15,7 @@ TOPIC_ARM_TRAJ = "/kuavo_arm_traj"  # sensor_msgs/JointState, 14 joints, DEGREES
 TOPIC_ARM_REACH = "/lb_arm_joint_reach_time/"  # + left|right -> Float32, that arm's Ruckig plan duration
 SERVICE_ARM_CTRL_MODE = "/wheel_arm_change_arm_ctrl_mode"  # 0 fixed / 1 auto-swing / 2 external
 SERVICE_MPC_CTRL_MODE = "/mobile_manipulator_mpc_control"  # 1 arm-only / 3 base+arm
-SERVICE_ENABLE_CONTROL = "/enable_control"  # std_srvs/Trigger, master enable
+SERVICE_ENABLE_CONTROL = "/enable_control"  # std_srvs/SetBool; true resumes, false soft-pauses
 
 # --- head camera (real robot; assets/robot/kuavo_5w/camera.md — the sim publishes none)
 TOPIC_CAMERA_RGB = "/camera/color/image_raw"  # sensor_msgs/Image, rgb8/bgr8

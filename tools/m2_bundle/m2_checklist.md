@@ -12,7 +12,8 @@
 
 - [ ] 机器人上电，等待控制器起（现场惯例；真机注意 `real:=true` 相关参数）
 - [ ] 机器人站稳、MPC 无报错；**周围清场**
-- [ ] `rosservice call /enable_control "{}"` 使能，**手离开机器人**
+- [ ] `rosservice call /enable_control "data: true"` 使能，**手离开机器人**
+      （该服务是 `std_srvs/SetBool`：`data: true` 恢复控制，`data: false` 是软暂停；空 `"{}"` 等于 false，会暂停机器人）
 
 ## 2. 通道检查（只读，不动机器人）
 

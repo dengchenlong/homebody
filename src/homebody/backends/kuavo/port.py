@@ -13,6 +13,7 @@ from . import camera
 from .joints import to_wire_degrees
 from .profile import (
     SERVICE_ARM_CTRL_MODE,
+    SERVICE_ENABLE_CONTROL,
     SERVICE_MPC_CTRL_MODE,
     TOPIC_ARM_REACH,
     TOPIC_ARM_TRAJ,
@@ -96,7 +97,7 @@ class KuavoPort:
             from nav_msgs.msg import Odometry
             from sensor_msgs.msg import CameraInfo, Image, JointState
             from std_msgs.msg import Float32
-            from std_srvs.srv import Empty, Trigger
+            from std_srvs.srv import SetBool
         except ImportError:
             _raise_ros_missing()
             raise  # unreachable; keeps the names defined for type checkers
@@ -107,7 +108,7 @@ class KuavoPort:
         self._rospy = rospy
         self._Twist, self._JointState, self._Odometry, self._Float32 = (
             Twist, JointState, Odometry, Float32)
-        self._sensorsData, self._Trigger, self._Empty = sensorsData, Trigger, Empty
+        self._sensorsData, self._SetBool = sensorsData, SetBool
         self._changeArmCtrlMode, self._changeTorsoCtrlMode = changeArmCtrlMode, changeTorsoCtrlMode
         self._lock = threading.Lock()
         self._sensors: dict | None = None
@@ -281,9 +282,13 @@ class KuavoPort:
         return proxy(request)
 
     def enable_control(self) -> bool:
-        """The master enable, a std_srvs/Trigger."""
-        return bool(self._service("/enable_control", self._Trigger,
-                                  self._Trigger._request_class()).success)
+        """The master enable, a std_srvs/SetBool (humanoidControllerWheelWbc's
+        enableControlCallback): true resumes, false soft-pauses."""
+        self._rospy.wait_for_service(SERVICE_ENABLE_CONTROL, timeout=5.0)
+        proxy = self._rospy.ServiceProxy(SERVICE_ENABLE_CONTROL, self._SetBool)
+        request = self._SetBool._request_class()
+        request.data = True
+        return bool(proxy(request).success)
 
     def close(self) -> None:
         for sub in getattr(self, "_subs", []):
