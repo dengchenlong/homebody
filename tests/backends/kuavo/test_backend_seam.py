@@ -179,6 +179,87 @@ def test_close_stops_and_closes_port():
     assert port.cmd_vel[-1] == (0.0, 0.0, 0.0)
 
 
+def test_close_after_driving_publishes_its_own_zero():
+    """new_epoch() already zeroes once, which hid the defect: setting _closed before
+    _stop_base() made the stop a no-op, so a backend driving at close kept its last
+    non-zero /cmd_vel until the controller's own 1 s timeout."""
+    backend, port = make_backend()
+    backend.new_epoch()
+    backend.base_velocity(1, 0.2, 0.0, 0.0)
+    backend.close()
+    assert port.cmd_vel[-1] == (0.0, 0.0, 0.0)
+
+
+def test_commands_after_close_are_refused():
+    """Commands that move the robot are refused once closed; stop() stays permitted, an
+    emergency stop must never raise."""
+    backend, port = make_backend()
+    backend.new_epoch()
+    backend.close()
+    for call in (lambda: backend.base_velocity(1, 0.2, 0.0, 0.0),
+                 lambda: backend.arm_target(1, "left", [0.0] * 7)):
+        with pytest.raises(ActionRejected):
+            call()
+    backend.stop(1)  # never raises
+    assert port.cmd_vel[-1] == (0.0, 0.0, 0.0)
+
+
+def test_the_waiting_arm_starts_from_its_measured_pose():
+    """Cold start: only the left arm is commanded, but the wire takes both blocks. The
+    right block was the gate's zero-initialised pose, so a right arm resting anywhere
+    else was dragged toward zero at the rate clamp — the arm actually held is the one
+    whose block must stand still. (FakePort records what the backend hands the port,
+    radians; the degree crossing lives inside KuavoPort.publish_arm_traj.)"""
+    left = [0.0] * 7
+    right = [-0.1, -0.2, 0.0, -0.5, 0.0, 0.1, 0.0]
+    backend, port = make_backend(joint_q=[0.0] * 4 + left + right + [0.0] * 2)
+    backend.new_epoch()
+    backend.arm_target(1, "left", left)
+    _, right_sent = port.arm_traj[-1]
+    for sent, measured in zip(right_sent, right):
+        assert abs(sent - measured) < 1e-9, \
+            f"the waiting arm was pulled to {sent:.3f} rad instead of its measured {measured:.3f}"
+
+
+def test_the_commanded_arm_starts_from_its_measured_pose():
+    """The first target must ramp from where the arm is, not from zero: with the gate
+    primed at zero, a first command to a pose the arm already holds sent a 0.21 rad
+    jump away from it and back."""
+    arm = [0.0, 0.3, 0.0, -0.6, 0.0, -0.3, 0.0]
+    backend, port = make_backend(joint_q=[0.0] * 4 + arm + [0.0] * 7 + [0.0] * 2)
+    backend.new_epoch()
+    backend.arm_target(1, "left", arm)
+    left_sent, _ = port.arm_traj[-1]
+    assert [round(v, 9) for v in left_sent] == [round(v, 9) for v in arm]
+
+
+def test_priming_happens_once_per_epoch_so_later_commands_still_track():
+    """Priming must not freeze the arm: a second, different target still moves it."""
+    arm = [0.0, 0.3, 0.0, -0.6, 0.0, -0.3, 0.0]
+    backend, port = make_backend(joint_q=[0.0] * 4 + arm + [0.0] * 7 + [0.0] * 2)
+    backend.new_epoch()
+    backend.arm_target(1, "left", arm)
+    port.clock_value += 0.01  # the next control tick
+    backend.arm_target(1, "left", [v + 0.05 for v in arm])
+    left_sent, _ = port.arm_traj[-1]
+    assert left_sent[1] > arm[1]
+
+
+def test_a_new_epoch_re_primes_from_the_pose_at_that_moment():
+    """A new generation must adopt the arm where it now stands, not replay the pose it
+    started from before the operator stop."""
+    first = [0.0, 0.3, 0.0, -0.6, 0.0, -0.3, 0.0]
+    moved = [0.0, 0.1, 0.0, -0.2, 0.0, -0.1, 0.0]
+    backend, port = make_backend(joint_q=[0.0] * 4 + first + [0.0] * 7 + [0.0] * 2)
+    backend.new_epoch()
+    backend.arm_target(1, "left", first)
+    port.joint_q[4:11] = moved  # the arm drifted while the operator was stopped
+    backend.new_epoch()
+    backend.arm_target(2, "left", moved)
+    left_sent, _ = port.arm_traj[-1]
+    assert [round(v, 9) for v in left_sent] == [round(v, 9) for v in moved]
+
+
 def test_gate_tolerates_a_slow_arm_that_keeps_converging():
     """The demo failure: the sim arm tracks the 1.05 rad/s command ramp with lag, so the
     gap grows by (almost exactly) max_delta per tick and the strict `<` flagged a

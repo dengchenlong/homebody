@@ -71,6 +71,7 @@ class KuavoBackend:
         self._epoch = 0
         self._sequence = 0
         self._arm_active = False
+        self._primed: set[str] = set()
         self._last_cmd_vel = 0.0
         self._stop_lock = threading.Lock()
         self._closed = False
@@ -97,15 +98,23 @@ class KuavoBackend:
         self._sequence = 0
         self._stop_base()
         self._arm_active = False
+        self._primed.clear()
         return self._epoch
 
     def _check_epoch(self, requested: int) -> None:
         if type(requested) is not int or requested != self._epoch:
             raise ActionRejected("Command belongs to an expired execution generation")
 
+    def _check_open(self) -> None:
+        """Refuses the commands that move the robot once closed; stop() stays permitted,
+        an emergency stop must never raise."""
+        if self._closed:
+            raise ActionRejected("The backend is closed")
+
     def base_velocity(self, epoch: int, forward: float, lateral: float,
                       yaw_rate: float) -> None:
         self._check_epoch(epoch)
+        self._check_open()
         values = (float(forward), float(lateral), float(yaw_rate))
         caps = (BASE_MAX_LINEAR_MPS, BASE_MAX_LINEAR_MPS, BASE_MAX_ANGULAR_RPS)
         if any(not math.isfinite(v) for v in values) or any(
@@ -116,6 +125,7 @@ class KuavoBackend:
 
     def arm_target(self, epoch: int, side: str, joints) -> None:
         self._check_epoch(epoch)
+        self._check_open()
         if side not in self._gates:
             raise ActionRejected("Hand must be left or right")
         values = np.asarray(joints, dtype=float)
@@ -125,6 +135,7 @@ class KuavoBackend:
         if np.any(values < lower) or np.any(values > upper):
             raise ActionRejected("Arm target exceeds joint limits")
         measured = self._measured_arm(side)
+        self._prime_side(side)
         gate = self._gates[side]
         now = self._port.clock()
         dt = self._dt_since(side, now)
@@ -228,7 +239,11 @@ class KuavoBackend:
 
     def _send_arm(self, side: str, q_cmd: np.ndarray) -> None:
         """Send one side's clamped block; the wire takes both blocks, radians in, and
-        the port converts to degrees at the only crossing."""
+        the port converts to degrees at the only crossing. The side not commanded this
+        tick holds its last command, primed from its measured pose the first time the
+        wire carries it — otherwise the zero start would drag that arm toward zero."""
+        other = "right" if side == "left" else "left"
+        self._prime_side(other)
         left = self._gates["left"]._q_cmd if side == "right" else q_cmd
         right = q_cmd if side == "right" else self._gates["right"]._q_cmd
         self._port.publish_arm_traj(left, right)
@@ -238,9 +253,19 @@ class KuavoBackend:
         self.new_epoch()
 
     def close(self) -> None:
-        self._closed = True
+        # The zero must go out before the flag lands: _stop_base() writes nothing once
+        # closed, and the controller only stops the base 1 s after the last command.
         self._stop_base()
+        self._closed = True
         self._port.close()
+
+    def _prime_side(self, side: str) -> None:
+        """Adopt the measured pose once per epoch, so the first command ramps from where
+        the arm is instead of pulling it toward the gate's zero start."""
+        if side in self._primed:
+            return
+        self._gates[side].prime(self._measured_arm(side))
+        self._primed.add(side)
 
     def grip(self, epoch: int, side: str, closure: float) -> None:
         raise ActionRejected("The kuavo 5W v1 has no gripper channel")
