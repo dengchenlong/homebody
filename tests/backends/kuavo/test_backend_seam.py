@@ -324,3 +324,120 @@ def test_gate_survives_the_deadman_step_boundary():
     gate(preset, arm, 0.2)  # tick0: the deadman-sized step
     _, following = gate(preset, arm, 0.01)  # tick1: arm not moved yet
     assert following, "the step boundary must not kill a converging arm"
+
+
+# --- deadman: the base stops when the commands stop, without waiting for the controller
+class CountdownClock:
+    """Monotonic seconds the test moves by hand; the wall clock is never consulted."""
+
+    def __init__(self, start: float = 100.0):
+        self.now = float(start)
+
+    def advance(self, seconds: float) -> None:
+        self.now += float(seconds)
+
+
+def make_deadman_backend(monkeypatch, joint_q=None):
+    backend, port = make_backend(joint_q)
+    clock = CountdownClock()
+    monkeypatch.setattr("homebody.backends.kuavo.backend._time.monotonic", lambda: clock.now)
+    monkeypatch.setattr("homebody.backends.kuavo.backend._time.sleep", lambda _s: None)
+    return backend, port, clock
+
+
+def test_deadman_zeroes_the_base_after_a_silent_gap(monkeypatch):
+    """The promise the class docstring made and the code did not keep: _last_cmd_vel was
+    written and never read, so a silent stream leaned on the controller's own 1 s stop.
+    The next advance() — every skill tick's wait — now sends the zero."""
+    from homebody.backends.kuavo.profile import DEADMAN_S
+
+    backend, port, clock = make_deadman_backend(monkeypatch)
+    backend.new_epoch()
+    backend.base_velocity(1, 0.2, 0.0, 0.0)
+    clock.advance(DEADMAN_S + 0.05)
+    backend.advance(1, 0.01)
+    assert port.cmd_vel[-1] == (0.0, 0.0, 0.0)
+
+
+def test_deadman_latches_once_so_the_zero_is_not_sprayed(monkeypatch):
+    """One zero per silence: the zero itself must not re-arm the watch, or every later
+    tick would publish another /cmd_vel zero for as long as the base stayed stopped."""
+    from homebody.backends.kuavo.profile import DEADMAN_S
+
+    backend, port, clock = make_deadman_backend(monkeypatch)
+    backend.new_epoch()
+    backend.base_velocity(1, 0.2, 0.0, 0.0)
+    clock.advance(DEADMAN_S + 0.05)
+    backend.advance(1, 0.01)
+    sent = len(port.cmd_vel)
+    for _ in range(5):
+        clock.advance(DEADMAN_S + 0.05)
+        backend.advance(1, 0.01)
+    assert len(port.cmd_vel) == sent
+
+
+def test_a_late_command_comes_only_after_the_stop(monkeypatch):
+    """The hazard the latch exists for: a command arriving after the gap must not resume
+    the base on a stream that never showed a zero. The stop goes out first."""
+    from homebody.backends.kuavo.profile import DEADMAN_S
+
+    backend, port, clock = make_deadman_backend(monkeypatch)
+    backend.new_epoch()
+    backend.base_velocity(1, 0.2, 0.0, 0.0)
+    clock.advance(DEADMAN_S + 0.05)
+    before = len(port.cmd_vel)
+    backend.base_velocity(1, 0.3, 0.0, 0.0)
+    assert port.cmd_vel[before:] == [(0.0, 0.0, 0.0), (0.3, 0.0, 0.0)]
+
+
+def test_deadman_does_not_fire_while_commands_keep_arriving(monkeypatch):
+    from homebody.backends.kuavo.profile import DEADMAN_S
+
+    backend, port, clock = make_deadman_backend(monkeypatch)
+    backend.new_epoch()
+    for _ in range(5):
+        backend.base_velocity(1, 0.2, 0.0, 0.0)
+        clock.advance(DEADMAN_S * 0.5)
+        backend.advance(1, 0.01)
+    assert all(v == (0.2, 0.0, 0.0) for v in port.cmd_vel[1:])
+
+
+def test_a_heartbeat_zero_is_a_command_and_renews_the_watch(monkeypatch):
+    """Session.heartbeat sends zero every 20 ms while the model thinks; the watch must
+    read that as a live stream, not as silence to guard against."""
+    from homebody.backends.kuavo.profile import DEADMAN_S
+
+    backend, port, clock = make_deadman_backend(monkeypatch)
+    backend.new_epoch()
+    for _ in range(20):
+        backend.base_velocity(1, 0.0, 0.0, 0.0)
+        clock.advance(DEADMAN_S * 0.5)
+        backend.advance(1, 0.01)
+    assert len(port.cmd_vel) == 21  # new_epoch's zero + 20 renewals, no deadman zero
+
+
+def test_stop_latches_so_a_stopped_base_is_not_zeroed_again(monkeypatch):
+    """stop() already put the zero on the wire; the watch must not send a second one."""
+    backend, port, clock = make_deadman_backend(monkeypatch)
+    backend.new_epoch()
+    backend.base_velocity(1, 0.2, 0.0, 0.0)
+    backend.stop(1)
+    sent = len(port.cmd_vel)
+    clock.advance(1.0)
+    backend.advance(1, 0.01)
+    assert len(port.cmd_vel) == sent
+
+
+def test_deadman_never_publishes_to_a_closed_port(monkeypatch):
+    """close() sent its own zero; a watch firing afterwards has nothing left to say."""
+    from homebody.backends.kuavo.profile import DEADMAN_S
+
+    backend, port, clock = make_deadman_backend(monkeypatch)
+    backend.new_epoch()
+    backend.base_velocity(1, 0.2, 0.0, 0.0)
+    backend.close()
+    sent = len(port.cmd_vel)
+    clock.advance(DEADMAN_S + 0.05)
+    backend.advance(1, 0.01)
+    backend.stop(1)  # never raises
+    assert len(port.cmd_vel) == sent

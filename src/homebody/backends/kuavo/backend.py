@@ -1,7 +1,9 @@
 """The Kuavo 5W backend: a full Robot implementation over KuavoPort.
 
 One commander at a time: an epoch guards every command, a deadman stops the base, the
-arm gates clamp every target before it reaches the wire. Observations translate at this
+arm gates clamp every target before it reaches the wire. The deadman fires on the next
+base_velocity/advance/stop after DEADMAN_S of silence — the controller's own 1 s stop
+covers a driver that never touches the backend again. Observations translate at this
 boundary into homebody-native records under the Kuavo joint layout; the camera is not
 wired yet, so snapshot() returns a valid blank frame (no depth, no labels) and grip()
 refuses — the 5W v1 has no gripper channel.
@@ -35,7 +37,7 @@ from .profile import (
     DEADMAN_S,
     MPC_BASE_ARM,
 )
-from .safety import ArmGate
+from .safety import ArmGate, BaseDeadman
 
 __all__ = ["KuavoBackend"]
 
@@ -63,6 +65,7 @@ class KuavoBackend:
                  layout: JointLayout | None = None):
         self._port = port if port is not None else KuavoPort()
         self._deadman_s = float(deadman_s)
+        self._base_deadman = BaseDeadman(self._deadman_s)
         self.layout = kuavo_layout() if layout is None else layout
         limits = arm_limits(urdf) if urdf is not None else None
         self._limits: dict[str, tuple[tuple[float, ...], tuple[float, ...]]] = {}
@@ -72,7 +75,6 @@ class KuavoBackend:
         self._sequence = 0
         self._arm_active = False
         self._primed: set[str] = set()
-        self._last_cmd_vel = 0.0
         self._stop_lock = threading.Lock()
         self._closed = False
         if limits is not None:
@@ -120,8 +122,11 @@ class KuavoBackend:
         if any(not math.isfinite(v) for v in values) or any(
                 abs(v) > cap for v, cap in zip(values, caps)):
             raise ActionRejected("Base velocity exceeds configured limits")
+        # The silent stream's zero goes first: a command arriving after the gap starts a
+        # new stream, and the controller must have seen the stop before it resumes.
+        self._fire_base_deadman()
         self._port.publish_cmd_vel(*values)
-        self._last_cmd_vel = _time.monotonic()
+        self._base_deadman.renew(_time.monotonic())
 
     def arm_target(self, epoch: int, side: str, joints) -> None:
         self._check_epoch(epoch)
@@ -150,6 +155,7 @@ class KuavoBackend:
         result = float(seconds)
         if not 0 < result <= 1:
             raise ActionRejected("Advance duration must be between zero and one second")
+        self._fire_base_deadman()
         _time.sleep(result)
 
     def snapshot(self) -> Frame:
@@ -220,11 +226,22 @@ class KuavoBackend:
         self._stop_base()
 
     # --- internals
+    def _fire_base_deadman(self) -> None:
+        """The stream's zero, once, when it went silent: after it the base is told quiet
+        and stays quiet until a command renews the stream. Never raises — it rides the
+        emergency path, and close() already sent its own zero."""
+        if self._closed:
+            return
+        if not self._base_deadman.due(_time.monotonic()):
+            return
+        with self._stop_lock:
+            self._port.publish_cmd_vel(0.0, 0.0, 0.0)
+
     def _stop_base(self) -> None:
         with self._stop_lock:
             if not self._closed:
                 self._port.publish_cmd_vel(0.0, 0.0, 0.0)
-        self._last_cmd_vel = _time.monotonic()
+        self._base_deadman.latch()
 
     def _measured_arm(self, side: str) -> np.ndarray:
         sensors = self._port.sensors()

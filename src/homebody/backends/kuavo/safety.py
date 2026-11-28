@@ -10,10 +10,35 @@ import numpy as np
 
 from .profile import DEADMAN_S
 
-__all__ = ["LIMIT_MARGIN_RAD", "MAX_JOINT_RATE_RAD_S", "ArmGate"]
+__all__ = ["LIMIT_MARGIN_RAD", "MAX_JOINT_RATE_RAD_S", "ArmGate", "BaseDeadman"]
 
 MAX_JOINT_RATE_RAD_S = 1.05  # rad/s; well under the controller's 6 rad/s joint cap
 LIMIT_MARGIN_RAD = 0.05  # rad kept away from each URDF stop
+
+
+class BaseDeadman:
+    """The base command stream's watchdog: after DEADMAN_S of silence the next touch
+    publishes one zero and latches until a command renews it. The controller's own 1 s
+    stop is the backstop for a driver that never touches the backend again; this is for
+    the one that does — a late command must not resume a stream that already died."""
+
+    def __init__(self, deadman_s: float = DEADMAN_S):
+        self.deadman_s = float(deadman_s)
+        self._last: float | None = None
+
+    def renew(self, now: float) -> None:
+        self._last = float(now)
+
+    def latch(self) -> None:
+        """Nothing is moving any more (a stop went out): disarm until a new command."""
+        self._last = None
+
+    def due(self, now: float) -> bool:
+        """Whether the stream went silent; latches, so the zero is published once."""
+        if self._last is None or float(now) - self._last <= self.deadman_s:
+            return False
+        self._last = None
+        return True
 
 
 class ArmGate:
